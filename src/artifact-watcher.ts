@@ -33,9 +33,23 @@ export function findLatestChangeId(repoPath: string): string | undefined {
  * `delta/udma/spec.md`, `.knowledge/events.ndjson`).
  */
 export function listChangeFiles(repoPath: string, changeId: string): string[] {
+  return listChangeFileStats(repoPath, changeId).map(entry => entry.file)
+}
+
+export interface ChangeFileStat {
+  file: string
+  mtimeMs: number
+}
+
+/**
+ * Recursively list non-empty files under the change workspace with their mtime.
+ * mtime drives write-back detection: a file whose mtime advances past the
+ * step's recorded finish time means the workflow regenerated it.
+ */
+export function listChangeFileStats(repoPath: string, changeId: string): ChangeFileStat[] {
   const root = join(changesRoot(repoPath), changeId)
   if (!existsSync(root)) return []
-  const out: string[] = []
+  const out: ChangeFileStat[] = []
   const walk = (dir: string): void => {
     let entries: string[] = []
     try {
@@ -52,7 +66,9 @@ export function listChangeFiles(repoPath: string, changeId: string): string[] {
         continue
       }
       if (st.isDirectory()) walk(full)
-      else if (st.isFile() && st.size > 0) out.push(relative(root, full).split(sep).join('/'))
+      else if (st.isFile() && st.size > 0) {
+        out.push({ file: relative(root, full).split(sep).join('/'), mtimeMs: st.mtimeMs })
+      }
     }
   }
   walk(root)

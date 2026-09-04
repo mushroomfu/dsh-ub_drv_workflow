@@ -76,6 +76,9 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                     noArtifactsLabel={t('noArtifacts')}
                     gateHint={t('gateConfirmHint')}
                     gateDoneHint={t('gateDone')}
+                    resultLabel={t('resultLabel')}
+                    outputDirLabel={t('outputDirLabel')}
+                    writebackLabel={t('writebackLabel')}
                     busy={busyGate === active.runId}
                     onConfirm={() => { void gate(active.runId, step.id, 'confirm') }}
                     onCancel={() => { void gate(active.runId, step.id, 'cancel') }}

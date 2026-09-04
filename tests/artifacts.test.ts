@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildStageChain } from '../src/core/stages.ts'
-import { applyArtifactEvidence } from '../src/core/artifacts.ts'
+import { applyArtifactEvidence, applyArtifactEvidenceWithMtime } from '../src/core/artifacts.ts'
 import type { WorkflowStep } from '../src/core/types.ts'
 
 function find(steps: WorkflowStep[], id: string): WorkflowStep {
@@ -56,5 +56,40 @@ describe('applyArtifactEvidence', () => {
     const files = ['.knowledge/events.ndjson']
     void applyArtifactEvidence(steps, files)
     expect(find(steps, 'routing-plan').status).toBe('done')
+  })
+})
+
+describe('applyArtifactEvidenceWithMtime (re-run guard)', () => {
+  it('does not re-close a re-running step on stale artifacts', () => {
+    const steps = buildStageChain({ mode: 'dev' })
+    // First run completes the requirement step.
+    void applyArtifactEvidence(steps, ['requirement_analysis.md'], '2026-01-01T00:00:00.000Z')
+    expect(find(steps, 'requirement').status).toBe('done')
+
+    // A write-back re-opens the step at a later time, but the file mtime is old.
+    const step = find(steps, 'requirement')
+    step.status = 'running'
+    step.startedAt = '2026-01-02T00:00:00.000Z'
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-01T00:00:00.000Z'),
+    }], '2026-01-02T00:01:00.000Z')
+    expect(step.status).toBe('running')
+
+    // Once the file is rewritten after the re-run start, the step closes again.
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-02T00:02:00.000Z'),
+    }], '2026-01-02T00:03:00.000Z')
+    expect(step.status).toBe('done')
+  })
+
+  it('keeps normal existence-based completion when no restart timestamps exist', () => {
+    const steps = buildStageChain({ mode: 'dev' })
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-01T00:00:00.000Z'),
+    }], '2026-01-01T00:01:00.000Z')
+    expect(find(steps, 'requirement').status).toBe('done')
   })
 })

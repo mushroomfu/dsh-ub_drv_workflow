@@ -43,6 +43,17 @@ export type StageOption = 'design-only'
 /** A hard user gate owned by the plugin (confirmation flows through the UI). */
 export type UserGateId = 'routing-plan' | 'design-gate' | 'deploy-ok'
 
+/** One detected write-back (resume/rollback) of a completed step. */
+export interface StepWriteback {
+  /** 1-based write-back sequence for the step. */
+  seq: number
+  at: string
+  /** Human-readable reason inferred from the regenerated artifact plus recent opencode output. */
+  reason: string
+  /** Latest matched artifact mtime that triggered the detection (epoch ms). */
+  mtimeMs: number
+}
+
 export interface WorkflowStep {
   /** Stable semantic id, serialized to disk. */
   id: StepId
@@ -64,6 +75,12 @@ export interface WorkflowStep {
   finishedAt?: string
   note?: string
   error?: string
+  /** Summary of what the step produced (filled once the step completes). */
+  result?: string
+  /** Absolute directory holding this step's main artifacts. */
+  outputDir?: string
+  /** Detected write-backs (resume/rollback) of this step after its first completion. */
+  writebacks?: StepWriteback[]
 }
 
 export interface WorkflowRun {
