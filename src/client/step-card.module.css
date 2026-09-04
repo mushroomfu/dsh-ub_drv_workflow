@@ -1,0 +1,219 @@
+.card {
+  box-sizing: border-box;
+  min-width: 168px;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  display: grid;
+  gap: 6px;
+  transition: border-color 160ms, box-shadow 160ms, opacity 160ms;
+}
+
+.status-waiting {
+  border-color: rgba(255, 176, 32, 0.9);
+  box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.35), 0 6px 18px rgba(255, 176, 32, 0.12);
+}
+
+.status-running {
+  border-color: rgba(64, 156, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(64, 156, 255, 0.25), 0 6px 18px rgba(64, 156, 255, 0.1);
+}
+
+.status-failed {
+  border-color: rgba(255, 82, 82, 0.9);
+  box-shadow: 0 0 0 1px rgba(255, 82, 82, 0.25), 0 6px 18px rgba(255, 82, 82, 0.1);
+}
+
+.status-done {
+  border-color: rgba(46, 160, 67, 0.8);
+}
+
+.status-skipped {
+  opacity: 0.55;
+}
+
+.compact {
+  min-width: 76px;
+  max-width: 120px;
+  padding: 6px 8px;
+  gap: 4px;
+  border-radius: 9px;
+}
+
+.compact .title {
+  font-size: 11px;
+}
+
+.compact .badge {
+  font-size: 9px;
+  padding: 0 4px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.title {
+  font-weight: 650;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.userBadge {
+  flex: none;
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(255, 176, 32, 0.18);
+  color: #ffb020;
+}
+
+.description {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: 10px;
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.badge-pending {
+  border-color: rgba(128, 128, 128, 0.5);
+  color: rgba(128, 128, 128, 1);
+}
+
+.badge-running {
+  border-color: rgba(64, 156, 255, 0.7);
+  color: #409cff;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.badge-waiting {
+  border-color: rgba(255, 176, 32, 0.8);
+  color: #ffb020;
+}
+
+.badge-done {
+  border-color: rgba(46, 160, 67, 0.7);
+  color: #2ea043;
+}
+
+.badge-failed {
+  border-color: rgba(255, 82, 82, 0.7);
+  color: #ff5252;
+}
+
+.badge-skipped {
+  border-color: rgba(128, 128, 128, 0.4);
+  color: rgba(128, 128, 128, 1);
+}
+
+.time {
+  opacity: 0.55;
+}
+
+.note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.75;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.error {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #ff5252;
+}
+
+.artifacts {
+  font-size: 10px;
+  display: grid;
+  gap: 3px;
+}
+
+.artifactsLabel {
+  opacity: 0.58;
+}
+
+.noArtifacts {
+  opacity: 0.42;
+}
+
+.artifactList {
+  margin: 0;
+  padding-left: 14px;
+  opacity: 0.7;
+}
+
+.gateBar {
+  border-top: 1px dashed rgba(255, 176, 32, 0.5);
+  padding-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.gateHint {
+  margin: 0;
+  font-size: 10px;
+  color: #ffb020;
+}
+
+.gateActions {
+  display: flex;
+  gap: 6px;
+}
+
+.confirmButton,
+.cancelButton {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.confirmButton {
+  background: rgba(46, 160, 67, 0.85);
+  color: #fff;
+}
+
+.cancelButton {
+  background: transparent;
+  border-color: rgba(255, 82, 82, 0.6);
+  color: #ff5252;
+}
+
+.confirmButton:disabled,
+.cancelButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}

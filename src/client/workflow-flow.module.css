@@ -1,0 +1,232 @@
+.view {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading {
+  display: grid;
+  gap: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.tagline {
+  font-size: 12px;
+  opacity: 0.62;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.stopButton,
+.formToggle,
+.deleteButton {
+  padding: 5px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+}
+
+.stopButton {
+  border-color: rgba(255, 82, 82, 0.55);
+  color: #ff5252;
+}
+
+.runMeta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.runId {
+  opacity: 0.78;
+}
+
+.runStatus {
+  opacity: 0.85;
+}
+
+.flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 8px 0 4px;
+  overflow-x: auto;
+}
+
+.connector {
+  flex: none;
+  width: 22px;
+  align-self: center;
+  height: 3px;
+  margin: 0 2px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.45);
+}
+
+.connector[data-status='pending'] { background: rgba(128, 128, 128, 0.45); }
+.connector[data-status='running'] { background: #409cff; }
+.connector[data-status='waiting'] { background: #ffb020; }
+.connector[data-status='done'] { background: #2ea043; }
+.connector[data-status='failed'] { background: #ff5252; }
+.connector[data-status='skipped'] { background: rgba(128, 128, 128, 0.3); }
+
+.developGroup {
+  display: grid;
+  gap: 6px;
+  justify-items: stretch;
+}
+
+.substeps {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.miniConnector {
+  flex: none;
+  width: 10px;
+  align-self: center;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.45);
+}
+
+.miniConnector[data-status='pending'] { background: rgba(128, 128, 128, 0.45); }
+.miniConnector[data-status='running'] { background: #409cff; }
+.miniConnector[data-status='waiting'] { background: #ffb020; }
+.miniConnector[data-status='done'] { background: #2ea043; }
+.miniConnector[data-status='failed'] { background: #ff5252; }
+.miniConnector[data-status='skipped'] { background: rgba(128, 128, 128, 0.3); }
+
+.placeholder {
+  margin: 14px 0;
+  font-size: 13px;
+  opacity: 0.62;
+}
+
+.helpCard {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 14px;
+  border: 1px solid rgba(64, 156, 255, 0.35);
+  border-radius: 14px;
+  background: rgba(64, 156, 255, 0.07);
+}
+
+.helpLead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.helpHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.72;
+}
+
+.command {
+  justify-self: start;
+  padding: 6px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff5252;
+}
+
+.logs {
+  font-size: 12px;
+}
+
+.logPre {
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 10px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.history {
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
+  padding-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.historyTitle {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.historyRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  border-radius: 8px;
+}
+
+.historyRunId {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyMeta {
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyStatus {
+  opacity: 0.8;
+}
+
+.deleteButton {
+  padding: 0 6px;
+  border: none;
+  font-size: 14px;
+  opacity: 0.6;
+}

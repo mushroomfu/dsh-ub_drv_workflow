@@ -1,0 +1,4 @@
+# Bundle patch: mount dsh-ub-workflow as a host plugin row for the DSH Web GUI.
+- insert:
+    - id: ui-ub-workflow
+      name: dsh-ub-workflow
