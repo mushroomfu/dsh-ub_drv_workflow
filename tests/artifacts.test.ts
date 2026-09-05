@@ -15,24 +15,24 @@ function find(steps: WorkflowStep[], id: string): WorkflowStep {
 }
 
 describe('applyArtifactEvidence', () => {
-  it('marks requirement and design complete from files', () => {
+  it('does not treat draft and design document presence as terminal success', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['requirement_analysis.md', 'detailed_design.md', 'delta/udma/spec.md']
-    expect(applyArtifactEvidence(steps, files)).toBe(true)
-    expect(find(steps, 'requirement').status).toBe('done')
-    expect(find(steps, 'design').status).toBe('done')
+    expect(applyArtifactEvidence(steps, files)).toBe(false)
+    expect(find(steps, 'requirement').status).toBe('pending')
+    expect(find(steps, 'design').status).toBe('pending')
     expect(find(steps, 'routing-plan').status).toBe('pending')
   })
 
-  it('marks patch prepare complete via globs', () => {
+  it('does not treat validation report presence as a passing result', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['implementation_notes.md', 'patch/0001-x.patch', 'patch_report.md', 'pre_review_report.md', 'compile_report.md']
     expect(applyArtifactEvidence(steps, files)).toBe(true)
     expect(find(steps, 'develop.implement').status).toBe('done')
-    expect(find(steps, 'develop.patch').status).toBe('done')
-    expect(find(steps, 'develop.pre-review').status).toBe('done')
-    expect(find(steps, 'develop.compile').status).toBe('done')
-    expect(find(steps, 'develop').status).toBe('done')
+    expect(find(steps, 'develop.patch').status).toBe('pending')
+    expect(find(steps, 'develop.pre-review').status).toBe('pending')
+    expect(find(steps, 'develop.compile').status).toBe('pending')
+    expect(find(steps, 'develop').status).toBe('pending')
   })
 
   it('does not downgrade an already failed step', () => {
@@ -46,15 +46,28 @@ describe('applyArtifactEvidence', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['requirement_analysis.md']
     const changed = applyArtifactEvidence(steps, files)
-    expect(find(steps, 'requirement').status).toBe('done')
+    expect(find(steps, 'requirement').status).toBe('pending')
     expect(find(steps, 'design').status).toBe('pending')
-    expect(changed).toBe(true)
+    expect(changed).toBe(false)
   })
 
-  it('treats .knowledge/events.ndjson as routing evidence', () => {
+  it('never treats a workspace artifact as user routing confirmation', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['.knowledge/events.ndjson']
-    void applyArtifactEvidence(steps, files)
-    expect(find(steps, 'routing-plan').status).toBe('done')
+    expect(applyArtifactEvidence(steps, files)).toBe(false)
+    expect(find(steps, 'routing-plan').status).toBe('pending')
+  })
+
+  it('requires an exact nested file hint instead of any sibling file', () => {
+    const steps = buildStageChain({ mode: 'dev' })
+    void applyArtifactEvidence(steps, ['.knowledge/retrieved.json'])
+    expect(find(steps, 'routing-plan').status).toBe('pending')
+  })
+
+  it('does not treat a partial Explore note as completion before process exit audit', () => {
+    const steps = buildStageChain({ mode: 'explore' })
+    expect(applyArtifactEvidence(steps, ['exploration_notes.md'])).toBe(false)
+    expect(find(steps, 'explore').status).toBe('pending')
+    expect(find(steps, 'explore').finishedAt).toBeUndefined()
   })
 })

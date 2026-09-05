@@ -9,7 +9,6 @@ import { clientBundle } from './build/tsdown.client.ts'
 
 export default clientBundle('dsh-ub-workflow', ['src/index.ts'], {
   libExternal: [
-    '@deepseek-ai/dsh-host-webserver',
     '@deepseek-ai/dsh-settings',
   ],
 })

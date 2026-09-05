@@ -5,7 +5,34 @@
  */
 
 import { allSteps, aggregateSubsteps } from './stages.ts'
-import type { WorkflowStep } from './types.ts'
+import type { StepId, WorkflowStep } from './types.ts'
+
+/**
+ * These stages produce a report on both success and failure. Their report's
+ * mere presence is useful for the UI but cannot be treated as a passing gate;
+ * the hash-verified terminal event is the authoritative result.
+ */
+export const EVENT_VERIFIED_STEPS = new Set<StepId>([
+  'requirement',
+  'design',
+  'develop',
+  'develop.patch',
+  'develop.pre-review',
+  'develop.compile',
+  'test.pre-dev',
+  'test.post-dev',
+  'test.regression',
+  'review',
+  'verify-deploy',
+  'verify',
+  'verify-stc',
+  'closeout',
+])
+
+/** Routing closes only by a user gate; Explore closes only after host exit/source/workspace checks. */
+export const HOST_VERIFIED_STEPS = new Set<StepId>(['routing-plan', 'explore'])
+
+const REVERSIBLE_ARTIFACT_STEPS = new Set<StepId>(['design-summary', 'develop.implement'])
 
 /** Minimal glob: `*` within a path segment, `**` across segments. */
 export function artifactPatternToRegExp(pattern: string): RegExp {
@@ -40,16 +67,12 @@ export function matchesArtifact(pattern: string, file: string): boolean {
   return artifactPatternToRegExp(pattern).test(file.replace(/\\/g, '/'))
 }
 
-/** True when a relative directory path contains at least one file (depth-insensitive). */
-function hasFileUnder(files: readonly string[], relDir: string): boolean {
-  const prefix = relDir.replace(/\\/g, '/').replace(/\/$/, '') + '/'
-  return files.some(file => file.replace(/\\/g, '/').startsWith(prefix))
-}
-
 /**
  * Apply filesystem evidence to all steps. A step with artifact hints is marked
- * done when every hint matches at least one file. Parent steps with substeps
- * also close when all substeps are done. Never downgrades a step.
+ * done when every hint matches at least one file and that step's artifact is
+ * success-only. Validation/report steps are closed by workflow terminal events
+ * instead, because those files are also written on failure. Parent steps with
+ * substeps close when all substeps are done. Never downgrades a step.
  *
  * @returns true when any step changed.
  */
@@ -62,22 +85,21 @@ export function applyArtifactEvidence(steps: WorkflowStep[], files: readonly str
       for (const sub of step.substeps) visit(sub)
     }
 
+    const hintsSatisfied = step.artifactHints.length > 0
+      && step.artifactHints.every(hint => files.some(file => matchesArtifact(hint, file)))
+
+    if (step.status === 'done' && REVERSIBLE_ARTIFACT_STEPS.has(step.id) && !hintsSatisfied) {
+      step.status = 'pending'
+      step.startedAt = undefined
+      step.finishedAt = undefined
+      step.note = undefined
+      step.error = undefined
+      changed = true
+    }
+
     if (step.status === 'done' || step.status === 'skipped' || step.status === 'failed') return
 
-    const directories = step.artifactHints.filter(hint => hint.includes('/') && !hint.includes('*'))
-    const patterns = step.artifactHints.filter(hint => hint.includes('*'))
-
-    const dirsOk = directories.every(hint => {
-      return hasFileUnder(files, hint.split('/')[0] === '.' ? hint.split('/')[1] : hint.split('/')[0])
-    })
-    // More precise single-file hints:
-    const fileHints = step.artifactHints.filter(hint => !hint.includes('/'))
-    const filesOk = fileHints.every(hint => files.some(file => file === hint))
-    const patternsOk = patterns.every(hint => files.some(file => matchesArtifact(hint, file)))
-
-    const hintsSatisfied = step.artifactHints.length > 0 && dirsOk && filesOk && patternsOk
-
-    if (hintsSatisfied) {
+    if (hintsSatisfied && !EVENT_VERIFIED_STEPS.has(step.id) && !HOST_VERIFIED_STEPS.has(step.id)) {
       step.status = 'done'
       if (step.finishedAt === undefined) step.finishedAt = at
       changed = true

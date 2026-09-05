@@ -1,9 +1,13 @@
-/** Shared loopback route paths (browser + host both import this file). */
-export const UB_WORKFLOW_API = {
-  state: '/api/ub-workflow/state',
-  runs: '/api/ub-workflow/runs',
-  run: '/api/ub-workflow/run',
-  gate: '/api/ub-workflow/gate',
-  stop: '/api/ub-workflow/stop',
-  delete: '/api/ub-workflow/delete',
+/** Logical endpoints carried by DSH's transport-aware Connection RPC. */
+export const UB_WORKFLOW_RPC_CHANNEL = '/ub-workflow'
+
+export const UB_WORKFLOW_RPC = {
+  state: 'state',
+  runs: 'runs',
+  run: 'run',
+  launch: 'launch',
+  gate: 'gate',
+  preview: 'preview',
+  stop: 'stop',
+  delete: 'delete',
 } as const

@@ -47,6 +47,15 @@ describe('parseOpencodeLine', () => {
     // Nested numeric junk may be collapsed as text, but parsing must never throw.
     expect(() => parseOpencodeLine(JSON.stringify({ foo: { bar: [1, 2, 3] } }))).not.toThrow()
   })
+
+  it('bounds traversal of deeply nested valid JSON', () => {
+    let value: unknown = { text: 'too deep' }
+    for (let depth = 0; depth < 5_000; depth += 1) value = { nested: value }
+    const line = JSON.stringify(value)
+
+    expect(() => parseOpencodeLine(line)).not.toThrow()
+    expect(parseOpencodeLine(line)).toMatchObject({ raw: expect.any(Object) })
+  })
 })
 
 describe('helper extractors', () => {

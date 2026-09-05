@@ -110,8 +110,7 @@ export function mobileBundle(id: string, entry: string): UserConfig {
     dts: false,
     sourcemap: true,
     clean: false,
-    external: [],
-    noExternal: [/.*/],
+    deps: { alwaysBundle: [/.*/] },
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
@@ -167,7 +166,7 @@ function clientLibraryConfig(
     fixedExtension: false,
     dts: false,
     clean: false,
-    external: ['@deepseek-ai/cordis', ...extraExternal],
+    deps: { neverBundle: ['@deepseek-ai/cordis', ...extraExternal] },
     ...overrides,
   }
 }
@@ -182,14 +181,16 @@ function clientConfig(id: string, entry: string): UserConfig {
     dts: false,
     sourcemap: true,
     clean: false,
-    external: [...CLIENT_EXTERNALS],
+    deps: {
+      neverBundle: [...CLIENT_EXTERNALS],
+      alwaysBundle: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
+    },
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
       __DSH_PKG_VERSION__: JSON.stringify(buildPackageVersion()),
     },
-    noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
     plugins: [{
       name: 'dsh-client-bundle-purity',
       resolveId(source: string) {

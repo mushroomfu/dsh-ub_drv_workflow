@@ -6,6 +6,7 @@
  */
 
 import type { RunMode } from './types.ts'
+import { isSafeWorkflowId } from './ids.ts'
 
 export interface ParsedWorkflowArgs {
   module?: string
@@ -50,17 +51,22 @@ export function parseWorkflowArgs(rawInput: string): ParsedWorkflowArgs {
       i += 1
     } else if (token === '--deploy') {
       deploy = true
-    } else if (token === '--change-id' && next !== undefined && !next.startsWith('--')) {
+    } else if (token === '--change-id' && next !== undefined && !next.startsWith('--') && isSafeWorkflowId(next)) {
       changeId = next
+      i += 1
+    } else if (token === '--change-id' && next !== undefined && !next.startsWith('--')) {
+      rest.push(token, next)
       i += 1
     } else {
       rest.push(token)
     }
   }
 
-  // `--deploy` implies the full chain; without an explicit different mode the
-  // run is full mode (the same semantic as the launch form's deploy checkbox).
+  // Preserve an explicit deploy request even when it conflicts with a dev,
+  // explore, or design route. The host must reject that intent visibly rather
+  // than silently downgrading a live-operation request.
   if (deploy && !explicitMode) mode = 'full'
+  if (designOnly) mode = 'dev'
 
   const requirement = rest.join(' ').trim()
 
