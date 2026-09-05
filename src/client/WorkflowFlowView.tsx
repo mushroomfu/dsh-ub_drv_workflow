@@ -425,7 +425,6 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
           <div className={css.heading}>
             <span className={css.eyebrow}>{t('eyebrow')}</span>
             <h2 className={css.title}>{t('title')}</h2>
-            <p className={css.tagline}>{t('tagline')}</p>
           </div>
         </div>
         <div
@@ -509,7 +508,6 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                   <div>
                     <span className={css.sectionKicker}>PIPELINE / {active.mode.toUpperCase()}</span>
                     <h3>{t('pipeline')}</h3>
-                    <p>{t('pipelineHint')}</p>
                   </div>
                   <div className={css.legend} aria-label="status legend">
                     {(['running', 'waiting_user', 'done', 'failed'] as const).map(status => (
@@ -552,9 +550,7 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                 <div className={css.idleIntro}>
                   <span className={css.sectionKicker}>SYSTEM READY</span>
                   <h3>{t('startFirst')}</h3>
-                  <p>{t('commandHint')}</p>
                   <code>{t('commandUsage')}</code>
-                  <small>{t('commandArgsHint')}</small>
                 </div>
                 <RunLaunchForm
                   defaultRepo={snapshot.repoPath}
@@ -562,7 +558,6 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                   labels={{
                     formKicker: t('formKicker'),
                     formTitle: t('formTitle'),
-                    launchHint: t('launchHint'),
                     requirement: t('requirement'),
                     requirementPlaceholder: t('requirementPlaceholder'),
                     module: t('module'),
@@ -586,7 +581,6 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                 <div>
                   <span className={css.sectionKicker}>RUN ARCHIVE</span>
                   <h3>{t('history')}</h3>
-                  <p>{t('historyHint')}</p>
                 </div>
                 <strong>{String(history.length).padStart(2, '0')}</strong>
               </header>

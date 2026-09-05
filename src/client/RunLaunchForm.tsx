@@ -8,7 +8,6 @@ export interface RunLaunchFormProps {
   labels: {
     formKicker: string
     formTitle: string
-    launchHint: string
     requirement: string
     requirementPlaceholder: string
     module: string
@@ -67,7 +66,6 @@ export function RunLaunchForm(props: RunLaunchFormProps): ReactNode {
         <div>
           <span className={css.kicker}>{labels.formKicker}</span>
           <h3 className={css.formTitle}>{labels.formTitle}</h3>
-          <p className={css.formHint}>{labels.launchHint}</p>
         </div>
         <span className={css.readyBeacon} aria-hidden="true"><i /></span>
       </header>
