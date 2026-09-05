@@ -215,6 +215,9 @@ function clientConfig(id: string, entry: string): UserConfig {
         const physical = isAbsolute(fileId) ? fileId : resolvePath(REPOSITORY_ROOT, fileId)
         this.addWatchFile(physical)
         const source = await readFile(physical)
+        // NOTE: lightningcss minify dedupes prefixed/unprefixed pairs keeping the
+        // LAST declaration — always write the unprefixed standard property last in
+        // src/client CSS (see docs/bug-report/css-prefix-minify-order).
         const { code, exports: cssExports } = transform({
           filename: fileId,
           code: source,
