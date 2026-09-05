@@ -1,10 +1,10 @@
 /** Authenticated loopback OpenCode REST/SSE runner. */
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { pathToFileURL } from 'node:url'
 import { describeOpencodeSpawn } from './runner.ts'
@@ -193,6 +193,40 @@ function openCodePermissionPath(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
+/**
+ * OpenCode 1.18.3 evaluates read/edit permission patterns as
+ * `path.relative(instance.worktree, target)`: the worktree is the Git toplevel
+ * of the working directory when that directory lives inside a repository (not
+ * the working directory itself), and the filesystem root for directories
+ * outside any repository. Emit each allow pattern relative to every candidate
+ * base so the configured rule matches whichever base OpenCode resolves.
+ */
+export function opencodeWorktreeBases(cwd: string): string[] {
+  const bases = [cwd]
+  let gitRoot: string | undefined
+  try {
+    const out = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+    }).trim()
+    if (out !== '') gitRoot = realpathSync(out)
+  } catch {
+    gitRoot = undefined
+  }
+  if (gitRoot !== undefined) {
+    if (gitRoot !== cwd) bases.push(gitRoot)
+  } else {
+    bases.push(sep)
+  }
+  return [...new Set(bases)]
+}
+
+/** Every worktree-relative spelling under which OpenCode may evaluate `target`. */
+export function opencodeTargetPatterns(bases: readonly string[], target: string): string[] {
+  return [...new Set(bases.map(base => openCodePermissionPath(relative(base, target))))]
+}
+
 export function permissionPatternMatches(
   rule: string,
   value: string,
@@ -234,30 +268,28 @@ function hasReadonlyExplorePermissions(
   if (!Array.isArray(value.permission) || value.permission.length > 512
     || !value.permission.every(permissionRule)) return false
   const rules = value.permission
+  const bases = opencodeWorktreeBases(repoPath)
   const writable = `ub-workspace/changes/${changeId}/exploration_notes.md`
-  const selectedProbe = openCodePermissionPath(relative(
-    repoPath,
-    join(sourceRoots[0]?.path ?? '__missing_source_root__', '__dsh_permission_probe__.c'),
-  ))
-  const selectedReference = openCodePermissionPath(relative(
-    repoPath,
-    join(configDir, 'references', module, '_manifest.yaml'),
-  ))
-  const foreignReference = openCodePermissionPath(relative(
-    repoPath,
-    join(configDir, 'references', '__foreign_module__', '_manifest.yaml'),
-  ))
+  const writablePatterns = opencodeTargetPatterns(bases, join(repoPath, writable))
+  const selectedProbe = opencodeTargetPatterns(bases,
+    join(sourceRoots[0]?.path ?? '__missing_source_root__', '__dsh_permission_probe__.c'))
+  const selectedReference = opencodeTargetPatterns(bases,
+    join(configDir, 'references', module, '_manifest.yaml'))
+  const foreignReference = opencodeTargetPatterns(bases,
+    join(configDir, 'references', '__foreign_module__', '_manifest.yaml'))
+  const every = (patterns: readonly string[], permission: string, action: 'allow' | 'deny'): boolean =>
+    patterns.every(pattern => effectivePermission(rules, permission, pattern) === action)
   return effectivePermission(rules, 'edit', 'src/__dsh_permission_probe__.c') === 'deny'
-    && effectivePermission(rules, 'edit', writable) === 'allow'
+    && every(writablePatterns, 'edit', 'allow')
     && effectivePermission(rules, 'edit', 'ub-workspace/.dsh-ub-workflow/runs.json') === 'deny'
     && effectivePermission(rules, 'bash', 'printf unsafe') === 'deny'
     && effectivePermission(rules, 'question', '*') === 'deny'
     && effectivePermission(rules, 'task', 'ub-design') === 'deny'
-    && effectivePermission(rules, 'read', selectedProbe) === 'allow'
+    && every(selectedProbe, 'read', 'allow')
     && effectivePermission(rules, 'read', '__dsh_forbidden_module__/probe.c') === 'deny'
-    && effectivePermission(rules, 'read', writable) === 'allow'
-    && effectivePermission(rules, 'read', selectedReference) === 'allow'
-    && effectivePermission(rules, 'read', foreignReference) === 'deny'
+    && every(writablePatterns, 'read', 'allow')
+    && every(selectedReference, 'read', 'allow')
+    && every(foreignReference, 'read', 'deny')
     && effectivePermission(rules, 'read', '.git/config') === 'deny'
     && effectivePermission(rules, 'read', '.env') === 'deny'
     && effectivePermission(rules, 'skill', 'ub-workflow') === 'deny'
@@ -613,21 +645,24 @@ export class OpenCodeServerRunner {
     }
     const pluginPath = join(runtime.root, 'credential-scrubber.js')
     const writableWorkspace = `ub-workspace/changes/${options.changeId}/exploration_notes.md`
+    const permissionBases = opencodeWorktreeBases(workspacePath)
+    const writablePatterns = opencodeTargetPatterns(permissionBases, join(workspacePath, writableWorkspace))
     const protectedReads: Record<string, 'allow' | 'deny'> = {
       '*': 'deny',
     }
     const allowReadTree = (root: string): void => {
-      const pattern = openCodePermissionPath(root)
-      protectedReads[pattern] = 'allow'
-      protectedReads[`${pattern}/**`] = 'allow'
+      for (const pattern of opencodeTargetPatterns(permissionBases, root)) {
+        protectedReads[pattern] = 'allow'
+        protectedReads[`${pattern}/**`] = 'allow'
+      }
     }
-    for (const root of runtime.sourceRoots) allowReadTree(relative(workspacePath, root.path))
-    protectedReads[writableWorkspace] = 'allow'
-    allowReadTree(relative(workspacePath, join(runtime.snapshot.configDir, 'references', '_shared')))
-    allowReadTree(relative(workspacePath, join(runtime.snapshot.configDir, 'references', options.module)))
+    for (const root of runtime.sourceRoots) allowReadTree(root.path)
+    for (const pattern of writablePatterns) protectedReads[pattern] = 'allow'
+    allowReadTree(join(runtime.snapshot.configDir, 'references', '_shared'))
+    allowReadTree(join(runtime.snapshot.configDir, 'references', options.module))
     const protectedEdits: Record<string, 'allow' | 'deny'> = {
       '*': 'deny',
-      [writableWorkspace]: 'allow',
+      ...Object.fromEntries(writablePatterns.map(pattern => [pattern, 'allow' as const])),
       [openCodePermissionPath(join(options.repoPath, 'agents', '**'))]: 'deny',
       [openCodePermissionPath(join(options.repoPath, 'skills', '**'))]: 'deny',
       [openCodePermissionPath(join(options.repoPath, 'opencode.json'))]: 'deny',

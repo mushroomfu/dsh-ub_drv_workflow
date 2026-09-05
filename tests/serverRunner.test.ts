@@ -8,6 +8,8 @@ import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   OpenCodeServerRunner,
+  opencodeTargetPatterns,
+  opencodeWorktreeBases,
   permissionPatternMatches,
   runtimeGuardPluginSource,
   SUPERVISOR_SOURCE,
@@ -60,8 +62,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_500): Promise<v
   }
 }
 
-function fixtureRepo(): string {
-  const root = mkdtempSync(join(tmpdir(), 'dsh-server-runner-test-'))
+function fixtureRepo(root = mkdtempSync(join(tmpdir(), 'dsh-server-runner-test-'))): string {
   temporaryRoots.push(root)
   mkdirSync(join(root, 'agents'), { recursive: true })
   mkdirSync(join(root, 'skills'), { recursive: true })
@@ -123,10 +124,11 @@ interface HarnessOptions {
   sseReadTimeoutMs?: number
   missingSessionStatus?: boolean
   completedSessionMessages?: boolean
+  repoPath?: string
 }
 
 function harness(options: HarnessOptions = {}) {
-  const repoPath = fixtureRepo()
+  const repoPath = options.repoPath ?? fixtureRepo()
   const children: FakeChild[] = []
   const calls: Array<{ path: string; init: RequestInit }> = []
   const streams: ReadableStreamDefaultController<Uint8Array>[] = []
@@ -270,6 +272,57 @@ describe('OpenCodeServerRunner lifecycle', () => {
       'c:/runtime/config/references/ummu/guide.md',
       'win32',
     )).toBe(false)
+  })
+
+  // Regression: OpenCode 1.18.3 evaluates read/edit permission patterns as
+  // path.relative(instance.worktree, target), where the worktree is the Git
+  // toplevel of the working directory. A workspace nested inside a larger
+  // checkout previously produced rules OpenCode could never match, so every
+  // read of the selected source roots and every write of exploration_notes.md
+  // was denied and Explore could only fail closed.
+  it('spells allow patterns relative to the enclosing Git worktree', () => {
+    const outer = mkdtempSync(join(tmpdir(), 'dsh-server-runner-worktree-'))
+    temporaryRoots.push(outer)
+    const init = spawnSync('git', ['init', '--quiet', outer], { encoding: 'utf8' })
+    if (init.status !== 0) return // git unavailable in this environment
+    const nested = join(outer, 'nested', 'workspace')
+    mkdirSync(nested, { recursive: true })
+    const repoPath = realpathSync(fixtureRepo(nested))
+    const bases = opencodeWorktreeBases(repoPath)
+    expect(bases).toEqual([repoPath, realpathSync(outer)])
+    const spellings = opencodeTargetPatterns(
+      bases,
+      join(repoPath, 'ub-workspace/changes/udma-explore-test/exploration_notes.md'),
+    )
+    expect(spellings).toContain('ub-workspace/changes/udma-explore-test/exploration_notes.md')
+    expect(spellings).toContain('nested/workspace/ub-workspace/changes/udma-explore-test/exploration_notes.md')
+  })
+
+  it('emits worktree-relative Explore allow rules for a workspace inside a larger Git checkout', async () => {
+    const outer = mkdtempSync(join(tmpdir(), 'dsh-server-runner-worktree-'))
+    temporaryRoots.push(outer)
+    const init = spawnSync('git', ['init', '--quiet', outer], { encoding: 'utf8' })
+    if (init.status !== 0) return // git unavailable in this environment
+    const nested = join(outer, 'nested', 'workspace')
+    mkdirSync(nested, { recursive: true })
+    const repoPath = fixtureRepo(nested)
+    const h = harness({ repoPath })
+    expect(h.runner.start(startOptions(repoPath))).toBe(true)
+    h.announce()
+    await waitUntil(() => h.streams.length === 1)
+    h.connect()
+    await waitUntil(() => h.calls.some(call => call.path === '/session/ses_main/prompt_async'))
+    const config = JSON.parse(h.environment().OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      agent: Record<string, { permission: { read: Record<string, string>; edit: Record<string, string> } }>
+    }
+    const permission = config.agent['ub-leader']!.permission
+    expect(permission.edit['nested/workspace/ub-workspace/changes/udma-explore-test/exploration_notes.md']).toBe('allow')
+    expect(permission.edit['ub-workspace/changes/udma-explore-test/exploration_notes.md']).toBe('allow')
+    expect(permission.read['nested/workspace/src']).toBe('allow')
+    expect(permission.read['nested/workspace/src/**']).toBe('allow')
+    expect(permission.read['src']).toBe('allow')
+    expect(permission.edit['*']).toBe('deny')
+    expect(permission.read['*']).toBe('deny')
   })
 
   it('loads only the immutable workflow snapshot before creating the workflow session', async () => {
