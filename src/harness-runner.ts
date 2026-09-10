@@ -22,6 +22,8 @@ interface AgentFacade {
   }
   whenIdle(): Promise<void>
   followup(message: unknown): void
+  /** Abort the active turn (DSH Agent.cancel). No-op when the agent is idle. */
+  cancel?(cause: { kind: 'user' }): void
 }
 
 interface AgentHandle {
@@ -302,6 +304,23 @@ export class HarnessRunner implements WorkflowRunner {
     this.sessionId = null
     this.active = false
     if (handle !== null) {
+      // Cancel the in-flight agent turn FIRST: for a host-agent handle
+      // dispose() is a no-op, so without cancel() the conversation agent
+      // keeps executing while the run is already marked stopped (observed as
+      // "drawer says stopped but the chat keeps running"). cancel() is a
+      // no-op when the agent is idle (gate wait), so it is always safe.
+      const agent = handle.agent
+      if (typeof agent.cancel === 'function') {
+        try {
+          agent.cancel({ kind: 'user' })
+          await Promise.race([
+            handle.agent.whenIdle().catch(() => {}),
+            new Promise(resolve => { setTimeout(resolve, 5000) }),
+          ])
+        } catch {
+          // best-effort: the drive loop owns error reporting
+        }
+      }
       try {
         await handle.dispose()
       } catch {

@@ -69,8 +69,12 @@ export class WorkflowStore {
   }
 
   listForRepo(repoPath: string): WorkflowRun[] {
+    // Session cwds arrive with backslashes while corrected run records may
+    // carry forward slashes; without normalization a mismatched separator
+    // makes persist() see zero runs for the workspace and WIPE its file.
+    const normalized = repoPath.replaceAll('\\', '/')
     return [...this.runs.values()]
-      .filter(run => run.repoPath === repoPath)
+      .filter(run => run.repoPath.replaceAll('\\', '/') === normalized)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
