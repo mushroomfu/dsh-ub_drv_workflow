@@ -11,12 +11,13 @@
  * command events.
  *
  * The visible button and drawer are portaled to `document.body`. The drawer
- * is a pure OVERLAY: it floats above the untouched conversation (the host
- * layout is never modified — no margin, no transform), so the chat keeps its
- * full width and scroll position while the workflow panel is open.
+ * is a pure OVERLAY with NO backdrop: the conversation underneath stays fully
+ * interactive (scroll, composer input, send) while the drawer is open. The
+ * drawer's bottom edge dynamically clears the composer so the input box is
+ * never covered.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { WorkflowFlowView } from './WorkflowFlowView.tsx'
@@ -29,11 +30,39 @@ export type WorkflowSidecarProps =
   & { workflowClient: UbWorkflowClient }
 
 const CLOSE_ANIMATION_MS = 240
+/** Drawer inset from the window bottom when no composer clearance applies. */
+const DRAWER_BOTTOM = 10
+/** The drawer never shrinks below this height; past it, it may overlap the composer. */
+const DRAWER_MIN_HEIGHT = 280
+
+/**
+ * Top edge of the conversation's input card, or -1 when absent.
+ *
+ * The composer slot wrappers are `display: contents` (zero-sized), so the
+ * measurement starts from the live text editor (textarea / contenteditable)
+ * and walks up to the first ancestor with real box geometry — the input card
+ * that carries the editor, send button and accessory rows.
+ */
+function findComposerTop(): number {
+  if (typeof document === 'undefined') return -1
+  const composerSlot = document.querySelector('[data-slot="conversation.composer"]')
+  if (composerSlot === null) return -1
+  const editor = composerSlot.querySelector('textarea, [contenteditable="true"]')
+  if (!(editor instanceof HTMLElement)) return -1
+  let el: HTMLElement | null = editor
+  for (let i = 0; i < 6 && el !== null && el !== document.body; i++) {
+    const rect = el.getBoundingClientRect()
+    if (rect.height >= 50 && rect.width > 200) return rect.top
+    el = el.parentElement
+  }
+  return editor.getBoundingClientRect().top - 16
+}
 
 export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
   const { t, useSession, workflowClient } = props
   const [panel, setPanel] = useState<'closed' | 'open' | 'closing'>('closed')
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const drawerRef = useRef<HTMLElement | null>(null)
 
   const transcriptHasWorkflow = useSession(snapshot => {
     // Snapshot shape varies across app versions: nodes live top-level or under
@@ -65,6 +94,51 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
 
   const hasWorkflow = transcriptHasWorkflow || registryHasWorkflow
 
+  const requestClose = useCallback((): void => {
+    setPanel(current => {
+      if (current !== 'open') return current
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+      closeTimer.current = setTimeout(() => {
+        closeTimer.current = null
+        setPanel('closed')
+      }, CLOSE_ANIMATION_MS)
+      return 'closing'
+    })
+  }, [])
+
+  // Esc closes the drawer, mirroring the header close button.
+  useEffect(() => {
+    if (panel !== 'open') return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') requestClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [panel, requestClose])
+
+  /**
+   * Keep the drawer clear of the conversation's input card: the composer
+   * (editor, send button, accessory rows) stays fully visible and usable
+   * while the drawer is open. Without a composer (blank hero) fall back to
+   * the plain window inset.
+   */
+  const applyComposerClearance = useCallback((): void => {
+    const drawer = drawerRef.current
+    if (drawer === null) return
+    const composerTop = findComposerTop()
+    let bottom = DRAWER_BOTTOM
+    if (composerTop > 44) bottom = Math.max(DRAWER_BOTTOM, Math.round(window.innerHeight - composerTop) + 12)
+    const maxBottom = Math.max(DRAWER_BOTTOM, window.innerHeight - 44 - DRAWER_MIN_HEIGHT)
+    drawer.style.bottom = `${Math.min(bottom, maxBottom)}px`
+  }, [])
+
+  useLayoutEffect(() => {
+    if (panel !== 'open') return
+    applyComposerClearance()
+    window.addEventListener('resize', applyComposerClearance)
+    return () => window.removeEventListener('resize', applyComposerClearance)
+  }, [panel, applyComposerClearance])
+
   // Reset the panel when the conversation stops being a workflow conversation.
   useEffect(() => {
     if (hasWorkflow) return
@@ -93,28 +167,15 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
     setPanel('open')
   }
 
-  const closePanel = (): void => {
-    if (panel !== 'open') return
-    setPanel('closing')
-    closeTimer.current = setTimeout(() => {
-      closeTimer.current = null
-      setPanel('closed')
-    }, CLOSE_ANIMATION_MS)
-  }
-
   return createPortal(
     <div className={dockCss.root} data-panel={panel}>
-      {panel !== 'closed'
-        ? <div className={dockCss.backdrop} onClick={closePanel} aria-hidden="true" />
-        : null}
-
       <button
         type="button"
         className={dockCss.fab}
         title={t('title')}
         aria-label={t('title')}
         aria-expanded={panel === 'open'}
-        onClick={panel === 'open' ? closePanel : openPanel}
+        onClick={panel === 'open' ? requestClose : openPanel}
       >
         <span className={dockCss.fabIcon} aria-hidden="true">UB</span>
         <span className={dockCss.fabLabel}>{t('title')}</span>
@@ -122,9 +183,18 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
 
       {panel !== 'closed'
         ? (
-            <aside className={dockCss.drawer} data-state={panel} onClick={event => { event.stopPropagation() }}>
+            <aside ref={drawerRef} className={dockCss.drawer} data-state={panel}>
               <header className={dockCss.drawerHeader}>
                 <h2 className={dockCss.drawerTitle}>{t('title')}</h2>
+                <button
+                  type="button"
+                  className={dockCss.drawerClose}
+                  onClick={requestClose}
+                  aria-label="关闭"
+                  title="关闭 (Esc)"
+                >
+                  <span aria-hidden="true">✕</span>
+                </button>
               </header>
               <div className={dockCss.drawerBody}>
                 {/* The view type wants the full session standard kit; both

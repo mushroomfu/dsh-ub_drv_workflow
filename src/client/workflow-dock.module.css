@@ -14,16 +14,9 @@
   z-index: 10;
 }
 
-.backdrop {
-  position: absolute;
-  /* Start below the 36px window titlebar so titlebar controls stay usable. */
-  top: 36px;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: auto;
-  background: rgba(3, 8, 15, 0.32);
-}
+/* NOTE: intentionally NO backdrop — the conversation underneath must stay
+   fully interactive (scroll, composer input, send) while the drawer is
+   open. Closing happens through the drawer's close button / Esc. */
 
 .fab {
   pointer-events: auto;
@@ -85,7 +78,8 @@
   position: absolute;
   z-index: 2;
   /* Pure overlay: floats above the untouched conversation with an inset from
-     every window edge — the host layout is never modified. */
+     every window edge — the host layout is never modified. The inline
+     `bottom` is raised at runtime so the drawer never covers the composer. */
   top: 44px;
   right: 10px;
   bottom: 10px;
@@ -123,6 +117,28 @@
   font-size: 15px;
   font-weight: 650;
   letter-spacing: 0.02em;
+}
+
+.drawerClose {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(116, 131, 155, 0.4);
+  border-radius: 999px;
+  background: transparent;
+  color: #8fa4bb;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.drawerClose:hover {
+  border-color: rgba(73, 219, 231, 0.7);
+  color: #49dbe7;
+  background: rgba(73, 219, 231, 0.08);
 }
 
 .drawerBody {
