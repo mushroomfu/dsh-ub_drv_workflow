@@ -1,0 +1,172 @@
+/* Floating sidecar (FAB + right drawer) for the UB workflow.
+   Liquid-glass family: shares the flow view's palette (#07111d base, cyan
+   accent) so the drawer reads as part of the same design system.
+   backdrop-filter keeps the unprefixed declaration LAST so lightningcss
+   minification cannot drop it (see repo history: build pitfall). */
+
+.root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  /* Below the app shell overlay layer (z-index 20) so chrome buttons, menus
+     and toasts stay clickable above the drawer, while floating above all
+     normal-flow content. */
+  z-index: 10;
+}
+
+.backdrop {
+  position: absolute;
+  /* Start below the 36px window titlebar so titlebar controls stay usable. */
+  top: 36px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: auto;
+  background: rgba(3, 8, 15, 0.32);
+}
+
+.fab {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 1;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(73, 219, 231, 0.55);
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015) 55%), rgba(6, 15, 26, 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  color: #49dbe7;
+  font: 600 13px/1 var(--dsw-font-family, Inter, ui-sans-serif, system-ui, sans-serif);
+  cursor: pointer;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.09), 0 10px 28px rgba(0, 5, 14, 0.45);
+  opacity: 0;
+  transform: translateY(-50%) translateX(10px);
+  animation: fabIn 220ms ease-out forwards;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.fab:hover {
+  border-color: rgba(73, 219, 231, 0.95);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 12px 32px rgba(0, 5, 14, 0.55), 0 0 18px rgba(73, 219, 231, 0.18);
+}
+
+/* The FAB would only ghost through the translucent drawer, so hide it while
+   the drawer is open; the drawer surface owns the close affordances. */
+.root[data-panel='open'] .fab {
+  visibility: hidden;
+}
+
+.fabIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(73, 219, 231, 0.14);
+  color: #49dbe7;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fabLabel {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.drawer {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 2;
+  /* Flush against the window on three sides (titlebar bottom, right edge,
+     bottom edge) and flush with the conversation column on the left: exactly
+     one rectangle is visible, with no surrounding lighter background frame.
+     The 36px top offset equals the app titlebar height. */
+  top: 36px;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: none;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 14% 4%, rgba(40, 190, 209, 0.1), transparent 28%),
+    linear-gradient(180deg, rgba(7, 17, 29, 0.97) 0%, rgba(5, 12, 22, 0.97) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  color: #dbe8f4;
+  /* No outline against the conversation (the join is flush and both sides
+     paint the same family of background): the edge is expressed only by a
+     tight shadow hugging the drawer's left border. */
+  box-shadow: -8px 0 18px rgba(0, 5, 14, 0.35);
+  transform: translateX(calc(100% + 16px));
+  opacity: 0;
+  animation: drawerIn 240ms cubic-bezier(0.22, 0.9, 0.28, 1) forwards;
+}
+
+.drawer[data-state='closing'] {
+  animation: drawerOut 240ms cubic-bezier(0.22, 0.9, 0.28, 1) forwards;
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.drawerTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.drawerBody {
+  min-height: 0;
+  display: grid;
+}
+
+@keyframes fabIn {
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
+@keyframes drawerIn {
+  from {
+    transform: translateX(calc(100% + 16px));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes drawerOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(calc(100% + 16px));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab,
+  .drawer {
+    animation-duration: 1ms;
+  }
+}

@@ -1,8 +1,10 @@
 /**
  * Browser-half entry for dsh-ub-workflow — runs inside the DSH web GUI.
- * Registers the locale dictionaries and mounts the workflow flow chart into
- * the conversation view ring (`conversation.view`), so it appears as a tab
- * beside the regular chat view.
+ * Registers the locale dictionaries, mounts the workflow flow chart into
+ * the conversation view ring (`conversation.view`, a tab beside the chat),
+ * and mounts the session-scoped floating sidecar (FAB + drawer) into the
+ * conversation header actions so any conversation that ran `/ub-workflow`
+ * keeps a one-click live-progress entrance.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -14,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { createUbWorkflowClient } from './api.ts'
 import { en, zh } from './locales.ts'
 import './slots-augment.ts'
+import { UbWorkflowSidecar, type WorkflowSidecarProps } from './workflow-sidecar.tsx'
 import { WorkflowFlowView, type WorkflowFlowViewProps } from './WorkflowFlowView.tsx'
 
 export type { WorkflowFlowViewProps } from './WorkflowFlowView.tsx'
@@ -40,14 +43,22 @@ export function apply(ctx: ClientContext): void {
 
   ctx.inject(['slots', 'connection'], (scope: ClientContext) => {
     const connection = (scope as unknown as { connection: { rpc: ClientConnectionRpc } }).connection
+    const clientOf = (sessionId: string) => createUbWorkflowClient(connection.rpc, sessionId)
     const SessionWorkflowFlowView = (props: Omit<WorkflowFlowViewProps, 'workflowClient'>): ReactNode => {
       const workflowClient = useMemo(
-        () => createUbWorkflowClient(connection.rpc, props.sessionId),
+        () => clientOf(props.sessionId),
         [props.sessionId],
       )
       return createElement(WorkflowFlowView, { key: props.sessionId, ...props, workflowClient })
     }
-    return scope.slots.inject('conversation.view', () => (
+    const SessionSidecar = (props: Omit<WorkflowSidecarProps, 'workflowClient'>): ReactNode => {
+      const workflowClient = useMemo(
+        () => clientOf(props.sessionId),
+        [props.sessionId],
+      )
+      return createElement(UbWorkflowSidecar, { key: props.sessionId, ...props, workflowClient })
+    }
+    const disposeView = scope.slots.inject('conversation.view', () => (
       scope.slots.register(
         {
           name: 'conversation.view',
@@ -59,5 +70,20 @@ export function apply(ctx: ClientContext): void {
         SessionWorkflowFlowView,
       )
     ))
+    const disposeSidecar = scope.slots.inject('conversation.session.header.actions', () => (
+      scope.slots.register(
+        {
+          name: 'conversation.session.header.actions',
+          id: 'ub-workflow-sidecar',
+          order: 40,
+          locale: NS,
+        },
+        SessionSidecar,
+      )
+    ))
+    return () => {
+      disposeView?.()
+      disposeSidecar?.()
+    }
   })
 }

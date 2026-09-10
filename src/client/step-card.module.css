@@ -81,11 +81,20 @@
 .status-done {
   --accent: #52dfa1;
   --accent-rgb: 82, 223, 161;
+  /* 左侧绿色强调条 + 一次性完成涟漪：与待执行卡一眼可辨。 */
+  border-left: 3px solid rgba(82, 223, 161, 0.9);
+  animation: done-pop 700ms ease-out;
 }
 
 .status-failed {
   --accent: #ff657a;
   --accent-rgb: 255, 101, 122;
+}
+
+/* 待执行：虚线边框 + 整卡降透明度，“未点亮”。 */
+.status-pending {
+  border-style: dashed;
+  opacity: 0.62;
 }
 
 .status-skipped {
@@ -172,6 +181,17 @@
   border-radius: 50%;
   background: rgba(var(--accent-rgb), 0.48);
   box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.58);
+}
+
+.signal[data-status='done'] {
+  background: rgb(82, 223, 161);
+  border-color: rgba(82, 223, 161, 0.9);
+}
+
+.signal[data-status='pending'] {
+  background: transparent;
+  border: 1px dashed rgba(116, 131, 155, 0.8);
+  box-shadow: none;
 }
 
 .signal[data-status='running']::after,
@@ -554,6 +574,11 @@
   font-size: 12px;
 }
 
+@keyframes done-pop {
+  0% { outline: 2px solid rgba(82, 223, 161, 0.55); outline-offset: 0; }
+  100% { outline: 2px solid rgba(82, 223, 161, 0); outline-offset: 12px; }
+}
+
 @keyframes signal-ring {
   0% { opacity: 0.9; transform: scale(0.55); }
   75%, 100% { opacity: 0; transform: scale(1.35); }
@@ -569,6 +594,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none !important;
+  }
+
   .card,
   .confirmButton,
   .reviseButton,
