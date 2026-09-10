@@ -1,7 +1,7 @@
 {
   "name": "dsh-ub-workflow",
   "description": "DSH Web GUI plugin: run the UnifiedBus (UB) kernel-driver opencode workflow from a new conversation view tab, showing every workflow step as a live card connected by status-colored lines.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
