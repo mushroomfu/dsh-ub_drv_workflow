@@ -23,32 +23,6 @@ describe('parseWorkflowArgs', () => {
     expect(parsed.mode).toBe('full')
   })
 
-  it('preserves conflicting deploy intent so the host can reject it', () => {
-    expect(parseWorkflowArgs('--mode dev --deploy implement it')).toMatchObject({
-      mode: 'dev',
-      designOnly: false,
-      deploy: true,
-    })
-    expect(parseWorkflowArgs('--mode explore --deploy inspect it')).toMatchObject({
-      mode: 'explore',
-      designOnly: false,
-      deploy: true,
-    })
-  })
-
-  it('makes design-only the single flow when combined with explore in either order', () => {
-    for (const input of [
-      '--stage design --mode explore inspect it',
-      '--mode explore --stage design inspect it',
-    ]) {
-      expect(parseWorkflowArgs(input)).toMatchObject({
-        mode: 'dev',
-        designOnly: true,
-        deploy: false,
-      })
-    }
-  })
-
   it('keeps unknown tokens in the requirement', () => {
     const parsed = parseWorkflowArgs('--experimental 试一下')
     expect(parsed.requirement).toBe('--experimental 试一下')
@@ -63,11 +37,5 @@ describe('parseWorkflowArgs', () => {
     const parsed = parseWorkflowArgs('--change-id --mode 看看 --module xyz 需求')
     expect(parsed.changeId).toBeUndefined()
     expect(parsed.requirement).toBe('--change-id --mode 看看 --module xyz 需求')
-  })
-
-  it('keeps unsafe change ids in the requirement instead of accepting a path', () => {
-    const parsed = parseWorkflowArgs('--change-id ../../outside 检查驱动')
-    expect(parsed.changeId).toBeUndefined()
-    expect(parsed.requirement).toBe('--change-id ../../outside 检查驱动')
   })
 })

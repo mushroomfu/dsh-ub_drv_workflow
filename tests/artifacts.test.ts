@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildStageChain } from '../src/core/stages.ts'
-import { applyArtifactEvidence } from '../src/core/artifacts.ts'
+import { applyArtifactEvidence, applyArtifactEvidenceWithMtime } from '../src/core/artifacts.ts'
 import type { WorkflowStep } from '../src/core/types.ts'
 
 function find(steps: WorkflowStep[], id: string): WorkflowStep {
@@ -15,24 +15,24 @@ function find(steps: WorkflowStep[], id: string): WorkflowStep {
 }
 
 describe('applyArtifactEvidence', () => {
-  it('does not treat draft and design document presence as terminal success', () => {
+  it('marks requirement and design complete from files', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['requirement_analysis.md', 'detailed_design.md', 'delta/udma/spec.md']
-    expect(applyArtifactEvidence(steps, files)).toBe(false)
-    expect(find(steps, 'requirement').status).toBe('pending')
-    expect(find(steps, 'design').status).toBe('pending')
+    expect(applyArtifactEvidence(steps, files)).toBe(true)
+    expect(find(steps, 'requirement').status).toBe('done')
+    expect(find(steps, 'design').status).toBe('done')
     expect(find(steps, 'routing-plan').status).toBe('pending')
   })
 
-  it('does not treat validation report presence as a passing result', () => {
+  it('marks patch prepare complete via globs', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['implementation_notes.md', 'patch/0001-x.patch', 'patch_report.md', 'pre_review_report.md', 'compile_report.md']
     expect(applyArtifactEvidence(steps, files)).toBe(true)
     expect(find(steps, 'develop.implement').status).toBe('done')
-    expect(find(steps, 'develop.patch').status).toBe('pending')
-    expect(find(steps, 'develop.pre-review').status).toBe('pending')
-    expect(find(steps, 'develop.compile').status).toBe('pending')
-    expect(find(steps, 'develop').status).toBe('pending')
+    expect(find(steps, 'develop.patch').status).toBe('done')
+    expect(find(steps, 'develop.pre-review').status).toBe('done')
+    expect(find(steps, 'develop.compile').status).toBe('done')
+    expect(find(steps, 'develop').status).toBe('done')
   })
 
   it('does not downgrade an already failed step', () => {
@@ -46,28 +46,50 @@ describe('applyArtifactEvidence', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['requirement_analysis.md']
     const changed = applyArtifactEvidence(steps, files)
-    expect(find(steps, 'requirement').status).toBe('pending')
+    expect(find(steps, 'requirement').status).toBe('done')
     expect(find(steps, 'design').status).toBe('pending')
-    expect(changed).toBe(false)
+    expect(changed).toBe(true)
   })
 
-  it('never treats a workspace artifact as user routing confirmation', () => {
+  it('treats .knowledge/events.ndjson as routing evidence', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['.knowledge/events.ndjson']
-    expect(applyArtifactEvidence(steps, files)).toBe(false)
-    expect(find(steps, 'routing-plan').status).toBe('pending')
+    void applyArtifactEvidence(steps, files)
+    expect(find(steps, 'routing').status).toBe('done')
   })
+})
 
-  it('requires an exact nested file hint instead of any sibling file', () => {
+describe('applyArtifactEvidenceWithMtime (re-run guard)', () => {
+  it('does not re-close a re-running step on stale artifacts', () => {
     const steps = buildStageChain({ mode: 'dev' })
-    void applyArtifactEvidence(steps, ['.knowledge/retrieved.json'])
-    expect(find(steps, 'routing-plan').status).toBe('pending')
+    // First run completes the requirement step.
+    void applyArtifactEvidence(steps, ['requirement_analysis.md'], '2026-01-01T00:00:00.000Z')
+    expect(find(steps, 'requirement').status).toBe('done')
+
+    // A write-back re-opens the step at a later time, but the file mtime is old.
+    const step = find(steps, 'requirement')
+    step.status = 'running'
+    step.startedAt = '2026-01-02T00:00:00.000Z'
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-01T00:00:00.000Z'),
+    }], '2026-01-02T00:01:00.000Z')
+    expect(step.status).toBe('running')
+
+    // Once the file is rewritten after the re-run start, the step closes again.
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-02T00:02:00.000Z'),
+    }], '2026-01-02T00:03:00.000Z')
+    expect(step.status).toBe('done')
   })
 
-  it('does not treat a partial Explore note as completion before process exit audit', () => {
-    const steps = buildStageChain({ mode: 'explore' })
-    expect(applyArtifactEvidence(steps, ['exploration_notes.md'])).toBe(false)
-    expect(find(steps, 'explore').status).toBe('pending')
-    expect(find(steps, 'explore').finishedAt).toBeUndefined()
+  it('keeps normal existence-based completion when no restart timestamps exist', () => {
+    const steps = buildStageChain({ mode: 'dev' })
+    void applyArtifactEvidenceWithMtime(steps, [{
+      file: 'requirement_analysis.md',
+      mtimeMs: Date.parse('2026-01-01T00:00:00.000Z'),
+    }], '2026-01-01T00:01:00.000Z')
+    expect(find(steps, 'requirement').status).toBe('done')
   })
 })

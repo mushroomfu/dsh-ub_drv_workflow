@@ -1,29 +1,26 @@
 /**
  * Browser-half entry for dsh-ub-workflow — runs inside the DSH web GUI.
- * Registers the locale dictionaries and mounts the session-scoped floating
- * sidecar (FAB + drawer) into the conversation header actions, so any
- * conversation that ran `/ub-workflow` keeps a one-click live-progress
- * entrance. The workflow flow chart lives only inside the drawer — there is
- * deliberately NO `conversation.view` tab registration.
+ *
+ * The visible entry is a session-scoped floating side button + animated right
+ * drawer. It is registered into `conversation.session.header.actions`, so the
+ * session-scoped component receives the conversation snapshot and decides from
+ * the durable `/ub-workflow` command node whether this conversation owns a
+ * workflow; other conversations never see it.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
-import { createElement, useMemo, type ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { createUbWorkflowClient } from './api.ts'
 import { en, zh } from './locales.ts'
 import './slots-augment.ts'
-import { UbWorkflowSidecar, type WorkflowSidecarProps } from './workflow-sidecar.tsx'
-import { WorkflowFlowView, type WorkflowFlowViewProps } from './WorkflowFlowView.tsx'
+import { UbWorkflowSidecar } from './workflow-sidecar.tsx'
+import { WorkflowFlowView } from './WorkflowFlowView.tsx'
 
 export type { WorkflowFlowViewProps } from './WorkflowFlowView.tsx'
 export { WorkflowFlowView } from './WorkflowFlowView.tsx'
 
-/** Required services: slots for the header entry and locale for copy. */
-export const inject = ['slots', 'locale', 'connection']
+/** Required services: slots for the session header, conversation for the seam, locale for copy. */
+export const inject = ['slots', 'conversation', 'locale']
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'ub-workflow'
@@ -41,26 +38,29 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'ub-workflow: dictionaries')
 
-  ctx.inject(['slots', 'connection'], (scope: ClientContext) => {
-    const connection = (scope as unknown as { connection: { rpc: ClientConnectionRpc } }).connection
-    const clientOf = (sessionId: string) => createUbWorkflowClient(connection.rpc, sessionId)
-    const SessionSidecar = (props: Omit<WorkflowSidecarProps, 'workflowClient'>): ReactNode => {
-      const workflowClient = useMemo(
-        () => clientOf(props.sessionId),
-        [props.sessionId],
-      )
-      return createElement(UbWorkflowSidecar, { key: props.sessionId, ...props, workflowClient })
+  ctx.inject(['slots', 'conversation'], (scope: ClientContext) => {
+    try {
+      // Wait for the session header-actions slot declaration, then register.
+      // `slots.inject` guarantees the declaration exists before our entry.
+      return scope.slots.inject('conversation.session.header.actions', () => {
+        try {
+          return scope.slots.register(
+            {
+              name: 'conversation.session.header.actions',
+              id: 'ub-workflow',
+              order: 40,
+              locale: NS,
+            },
+            UbWorkflowSidecar,
+          )
+        } catch (error) {
+          console.warn('[ub-workflow] failed to register workflow sidecar', error)
+          return () => {}
+        }
+      })
+    } catch (error) {
+      console.warn('[ub-workflow] failed to wait for workflow sidecar slot', error)
+      return () => {}
     }
-    return scope.slots.inject('conversation.session.header.actions', () => (
-      scope.slots.register(
-        {
-          name: 'conversation.session.header.actions',
-          id: 'ub-workflow-sidecar',
-          order: 40,
-          locale: NS,
-        },
-        SessionSidecar,
-      )
-    ))
   })
 }

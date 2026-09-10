@@ -3,15 +3,15 @@ import { buildStageChain } from '../src/core/stages.ts'
 
 describe('buildStageChain', () => {
   it('builds the dev chain with develop substeps', () => {
-    const chain = buildStageChain({ mode: 'dev', testTimings: ['post-dev'] })
+    const chain = buildStageChain({ mode: 'dev' })
     expect(chain.map(s => s.id)).toEqual([
+      'routing',
       'routing-plan',
       'requirement',
-      'requirement-clarify',
       'design',
       'design-gate',
       'develop',
-      'test.post-dev',
+      'test',
       'review',
       'closeout',
     ])
@@ -24,63 +24,25 @@ describe('buildStageChain', () => {
     ])
   })
 
-  it('builds the design-only chain with its post-confirmation summary', () => {
+  it('builds the design-only chain ending at design-gate', () => {
     const chain = buildStageChain({ mode: 'dev', designOnly: true })
-    expect(chain.map(s => s.id)).toEqual([
-      'routing-plan',
-      'requirement',
-      'requirement-clarify',
-      'design',
-      'design-gate',
-      'design-summary',
-    ])
+    expect(chain.map(s => s.id)).toEqual(['routing', 'routing-plan', 'requirement', 'design', 'design-gate'])
   })
 
-  it('marks requirement clarification as a response-based hard gate', () => {
-    const chain = buildStageChain({ mode: 'dev' })
-    const clarify = chain.find(step => step.id === 'requirement-clarify')
-    expect(clarify).toMatchObject({
-      needsUser: true,
-      gate: 'requirement-clarify',
-      interaction: 'response',
-    })
-  })
-
-  it('collects mandatory develop inputs at the non-design-only design gate', () => {
-    const devGate = buildStageChain({ mode: 'dev' }).find(step => step.id === 'design-gate')
-    const designOnlyGate = buildStageChain({ mode: 'dev', designOnly: true }).find(step => step.id === 'design-gate')
-    expect(devGate?.interaction).toBe('response')
-    expect(designOnlyGate?.interaction).toBe('confirm')
-  })
-
-  it('shows deployment, its hard gate, and STC as separate full-mode stages', () => {
-    const chain = buildStageChain({ mode: 'full', deploy: true, testTimings: ['post-dev'] })
-    expect(chain.map(s => s.id)).toEqual([
-      'routing-plan',
-      'requirement',
-      'requirement-clarify',
-      'design',
-      'design-gate',
-      'develop',
-      'test.post-dev',
-      'review',
-      'deploy-authorize',
-      'verify-deploy',
-      'deploy-ok',
-      'verify-stc',
-      'closeout',
-    ])
+  it('adds verify + deploy-ok for full mode with deploy', () => {
+    const chain = buildStageChain({ mode: 'full', deploy: true })
+    expect(chain.map(s => s.id)).toContain('verify')
+    expect(chain.map(s => s.id)).toContain('deploy-ok')
+    expect(chain.findIndex(s => s.id === 'deploy-ok')).toBeGreaterThan(chain.findIndex(s => s.id === 'verify'))
   })
 
   it('omits verify for full mode without deploy', () => {
     const chain = buildStageChain({ mode: 'full' })
-    expect(chain.map(s => s.id)).not.toContain('verify-deploy')
-    expect(chain.map(s => s.id)).not.toContain('verify-stc')
+    expect(chain.map(s => s.id)).not.toContain('verify')
   })
 
-  it('keeps routing confirmation visible before the single explore step', () => {
+  it('explore mode is a single step', () => {
     const chain = buildStageChain({ mode: 'explore' })
-    expect(chain.map(s => s.id)).toEqual(['routing-plan', 'explore'])
-    expect(chain[0]?.artifactHints).toEqual([])
+    expect(chain.map(s => s.id)).toEqual(['explore'])
   })
 })

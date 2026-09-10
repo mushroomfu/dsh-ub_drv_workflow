@@ -110,7 +110,8 @@ export function mobileBundle(id: string, entry: string): UserConfig {
     dts: false,
     sourcemap: true,
     clean: false,
-    deps: { alwaysBundle: [/.*/] },
+    external: [],
+    noExternal: [/.*/],
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
@@ -166,7 +167,7 @@ function clientLibraryConfig(
     fixedExtension: false,
     dts: false,
     clean: false,
-    deps: { neverBundle: ['@deepseek-ai/cordis', ...extraExternal] },
+    external: ['@deepseek-ai/cordis', ...extraExternal],
     ...overrides,
   }
 }
@@ -181,16 +182,14 @@ function clientConfig(id: string, entry: string): UserConfig {
     dts: false,
     sourcemap: true,
     clean: false,
-    deps: {
-      neverBundle: [...CLIENT_EXTERNALS],
-      alwaysBundle: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
-    },
+    external: [...CLIENT_EXTERNALS],
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
       __DSH_PKG_VERSION__: JSON.stringify(buildPackageVersion()),
     },
+    noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
     plugins: [{
       name: 'dsh-client-bundle-purity',
       resolveId(source: string) {
@@ -215,9 +214,6 @@ function clientConfig(id: string, entry: string): UserConfig {
         const physical = isAbsolute(fileId) ? fileId : resolvePath(REPOSITORY_ROOT, fileId)
         this.addWatchFile(physical)
         const source = await readFile(physical)
-        // NOTE: lightningcss minify dedupes prefixed/unprefixed pairs keeping the
-        // LAST declaration — always write the unprefixed standard property last in
-        // src/client CSS (see docs/bug-report/css-prefix-minify-order).
         const { code, exports: cssExports } = transform({
           filename: fileId,
           code: source,

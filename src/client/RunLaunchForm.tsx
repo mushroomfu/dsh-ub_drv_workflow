@@ -1,4 +1,10 @@
+/**
+ * Launch form for the UB workflow. The module/mode/change-id fields mirror the
+ * ub-leader explicit parameters; the requirement text is passed verbatim.
+ */
+
 import { useState, type ReactNode } from 'react'
+import type { RunMode } from '../core/types.ts'
 import type { LaunchPayload } from './api.ts'
 import css from './run-launch-form.module.css'
 
@@ -6,15 +12,17 @@ export interface RunLaunchFormProps {
   defaultRepo: string
   sessionId?: string
   labels: {
-    formKicker: string
     formTitle: string
     requirement: string
     requirementPlaceholder: string
     module: string
     moduleAuto: string
     mode: string
+    modeDev: string
+    modeFull: string
     modeExplore: string
-    scopeNotice: string
+    designOnly: string
+    deploy: string
     changeId: string
     start: string
     repoPath: string
@@ -26,24 +34,29 @@ const MODULES = ['', 'ubase', 'cdma', 'udma', 'ummu', 'ubus'] as const
 
 export function RunLaunchForm(props: RunLaunchFormProps): ReactNode {
   const { labels } = props
+  const [repoPath, setRepoPath] = useState(props.defaultRepo)
   const [requirement, setRequirement] = useState('')
   const [module, setModule] = useState('')
+  const [mode, setMode] = useState<RunMode>('dev')
+  const [designOnly, setDesignOnly] = useState(false)
+  const [deploy, setDeploy] = useState(false)
   const [changeId, setChangeId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (): Promise<void> => {
-    if (requirement.trim() === '' || module === '') return
+    if (requirement.trim() === '') return
     setBusy(true)
     setError(null)
     try {
       await props.onLaunch({
+        repoPath,
         sessionId: props.sessionId,
         requirement: requirement.trim(),
-        module,
-        mode: 'explore',
-        designOnly: false,
-        deploy: false,
+        module: module.trim() || undefined,
+        mode,
+        designOnly,
+        deploy: mode === 'full' && deploy,
         changeId: changeId.trim() || undefined,
       })
       setRequirement('')
@@ -62,29 +75,25 @@ export function RunLaunchForm(props: RunLaunchFormProps): ReactNode {
         void submit()
       }}
     >
-      <header className={css.formHeader}>
-        <div>
-          <span className={css.kicker}>{labels.formKicker}</span>
-          <h3 className={css.formTitle}>{labels.formTitle}</h3>
-        </div>
-        <span className={css.readyBeacon} aria-hidden="true"><i /></span>
-      </header>
+      <h3 className={css.formTitle}>{labels.formTitle}</h3>
 
-      <div className={css.repoStrip}>
+      <label className={css.field}>
         <span>{labels.repoPath}</span>
-        <code title={props.defaultRepo}>{props.defaultRepo}</code>
-      </div>
+        <input
+          value={repoPath}
+          onChange={event => { setRepoPath(event.target.value) }}
+          spellCheck={false}
+        />
+      </label>
 
-      <label className={[css.field, css.requirementField].join(' ')}>
+      <label className={css.field}>
         <span>{labels.requirement}</span>
         <textarea
           value={requirement}
           onChange={event => { setRequirement(event.target.value) }}
           placeholder={labels.requirementPlaceholder}
-          rows={5}
-          maxLength={20_000}
+          rows={4}
         />
-        <small>{requirement.length.toLocaleString()} / 20,000</small>
       </label>
 
       <div className={css.row}>
@@ -92,44 +101,74 @@ export function RunLaunchForm(props: RunLaunchFormProps): ReactNode {
           <span>{labels.module}</span>
           <select value={module} onChange={event => { setModule(event.target.value) }}>
             <option value="">{labels.moduleAuto}</option>
-            {MODULES.slice(1).map(id => <option key={id} value={id}>{id.toUpperCase()}</option>)}
+            {MODULES.slice(1).map(id => <option key={id} value={id}>{id}</option>)}
           </select>
         </label>
 
-        <div className={css.field}>
+        <label className={css.field}>
           <span>{labels.mode}</span>
-          <div className={css.lockedMode}><i aria-hidden="true" />{labels.modeExplore}</div>
-        </div>
+          <select
+            value={mode}
+            onChange={(event) => {
+              const next = event.target.value as RunMode
+              setMode(next)
+              if (next !== 'full') setDeploy(false)
+            }}
+          >
+            <option value="dev">{labels.modeDev}</option>
+            <option value="full">{labels.modeFull}</option>
+            <option value="explore">{labels.modeExplore}</option>
+          </select>
+        </label>
 
         <label className={css.field}>
           <span>{labels.changeId}</span>
           <input
             value={changeId}
-            onChange={event => { setChangeId(event.target.value.replace(/[^A-Za-z0-9._-]/g, '')) }}
+            onChange={event => { setChangeId(event.target.value) }}
             placeholder="module-desc-date"
-            maxLength={128}
             spellCheck={false}
           />
         </label>
       </div>
 
       <div className={css.checks}>
-        <p className={css.safetyNotice}>{labels.scopeNotice}</p>
+        <label className={css.check}>
+          <input
+            type="checkbox"
+            checked={designOnly}
+            onChange={event => {
+              setDesignOnly(event.target.checked)
+              if (event.target.checked) {
+                setMode('dev')
+                setDeploy(false)
+              }
+            }}
+          />
+          <span>{labels.designOnly}</span>
+        </label>
+        <label className={css.check}>
+          <input
+            type="checkbox"
+            checked={mode === 'full' && deploy}
+            disabled={mode !== 'full' || designOnly}
+            onChange={event => { setDeploy(event.target.checked) }}
+          />
+          <span>{labels.deploy}</span>
+        </label>
       </div>
 
-      {error !== null ? <p className={css.error} role="alert">{error}</p> : null}
+      {error !== null
+        ? <p className={css.error}>{error}</p>
+        : null}
 
-      <div className={css.submitRow}>
-        <span className={css.submitLine} aria-hidden="true" />
-        <button
-          type="submit"
-          className={css.submit}
-          disabled={busy || requirement.trim() === '' || module === ''}
-        >
-          <span>{busy ? 'INITIALIZING…' : labels.start}</span>
-          <b aria-hidden="true">↗</b>
-        </button>
-      </div>
+      <button
+        type="submit"
+        className={css.submit}
+        disabled={busy || requirement.trim() === ''}
+      >
+        {busy ? '…' : labels.start}
+      </button>
     </form>
   )
 }

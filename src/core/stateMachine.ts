@@ -8,9 +8,7 @@ import { firstUnfinished, previousStep } from './stages.ts'
 import type { StepId, StepStatus, WorkflowStep } from './types.ts'
 
 export function markStepStatus(steps: WorkflowStep[], stepId: StepId, status: StepStatus, at?: string, note?: string): boolean {
-  const step = steps
-    .flatMap(candidate => [candidate, ...(candidate.substeps ?? [])])
-    .find(candidate => candidate.id === stepId)
+  const step = steps.find(s => s.id === stepId)
   if (step === undefined) return false
   if (step.status === status) return false
   step.status = status
@@ -31,8 +29,6 @@ export function resetAfter(steps: WorkflowStep[], stepId: StepId): void {
       step.finishedAt = undefined
       step.note = undefined
       step.error = undefined
-      step.evidenceId = undefined
-      step.supportingEvidenceIds = undefined
       if (step.substeps !== undefined) {
         for (const sub of step.substeps) {
           sub.status = 'pending'
@@ -40,8 +36,6 @@ export function resetAfter(steps: WorkflowStep[], stepId: StepId): void {
           sub.finishedAt = undefined
           sub.note = undefined
           sub.error = undefined
-          sub.evidenceId = undefined
-          sub.supportingEvidenceIds = undefined
         }
       }
     }
@@ -126,13 +120,8 @@ export function walkChain(runSteps: WorkflowStep[], options: {
 
 /** Best-effort error attribution: first running/pending non-gate step gets the failure. */
 export function attachFailure(steps: WorkflowStep[], error: string, now?: string): StepId | undefined {
-  // Prefer the deepest active develop substep so a compile/pre-review failure
-  // is not flattened onto the broad parent card.
-  const candidates = steps.flatMap(step => (
-    step.substeps === undefined ? [step] : [...step.substeps, step]
-  ))
-  const candidate = candidates.find(step => step.status === 'running')
-    ?? candidates.find(step => step.status === 'pending' && !(step.needsUser && step.gate !== undefined))
+  const candidate = steps.find(s => s.status === 'running')
+    ?? steps.find(s => s.status === 'pending' && !(s.needsUser && s.gate !== undefined))
   if (candidate === undefined) return undefined
   markStepStatus(steps, candidate.id, 'failed', now ?? new Date().toISOString(), error)
   return candidate.id

@@ -4,11 +4,10 @@
  * The entry is mounted in the conversation header-action slot, so it is only
  * rendered for a real conversation. Visibility is decided by two durable
  * signals: the session transcript's `/ub-workflow` command node (live
- * sessions project it instantly) and the run registry served over Connection
- * RPC — the RPC `state` endpoint is session-scoped by the host, so any
- * returned run belongs to THIS conversation and the entry survives restarts
- * even when a very large restored session no longer projects its early
- * command events.
+ * sessions project it instantly) and the run registry served by the host
+ * (`/api/ub-workflow/state` — persisted runs carry the conversation binding),
+ * so the entry survives restarts even when a very large restored session no
+ * longer projects its early command events.
  *
  * Layout: while the drawer is open the conversation column is pushed LEFT
  * with an animated inline margin-right until its right edge meets the
@@ -22,14 +21,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { ubWorkflowClient } from './api.ts'
 import { WorkflowFlowView } from './WorkflowFlowView.tsx'
-import type { UbWorkflowClient } from './api.ts'
 import dockCss from './workflow-dock.module.css'
 
 export type WorkflowSidecarProps =
   PropsRuntime<'conversation.session.header.actions'>
   & PropsLocale<'ub-workflow'>
-  & { workflowClient: UbWorkflowClient }
 
 const CLOSE_ANIMATION_MS = 240
 const SHIFT_TRANSITION = 'margin-right 240ms cubic-bezier(0.22, 0.9, 0.28, 1)'
@@ -112,7 +110,7 @@ function findComposerTop(): number {
 }
 
 export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
-  const { t, useSession, workflowClient } = props
+  const { sessionId, t, useSession } = props
   const [panel, setPanel] = useState<'closed' | 'open' | 'closing'>('closed')
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const drawerRef = useRef<HTMLElement | null>(null)
@@ -133,19 +131,20 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
 
   // Durable fallback: on very large sessions the restored transcript projection
   // drops early events, so the live-session command node alone cannot gate the
-  // entry across restarts. The host's session-scoped run registry answers on
-  // mount with this conversation's runs (any record implies the command ran).
+  // entry across restarts. The persisted run registry knows the conversation
+  // binding, so one lightweight state fetch on mount keeps the entry visible
+  // in restored sessions whose workflow history predates the window.
   const [registryHasWorkflow, setRegistryHasWorkflow] = useState(false)
   useEffect(() => {
     if (transcriptHasWorkflow || registryHasWorkflow) return
     let alive = true
-    void workflowClient.state()
+    void ubWorkflowClient.state()
       .then(snapshot => {
-        if (alive) setRegistryHasWorkflow((snapshot.runs ?? []).length > 0)
+        if (alive) setRegistryHasWorkflow((snapshot.runs ?? []).some(run => run.sessionId === sessionId))
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [transcriptHasWorkflow, registryHasWorkflow, workflowClient])
+  }, [transcriptHasWorkflow, registryHasWorkflow, sessionId])
 
   const hasWorkflow = transcriptHasWorkflow || registryHasWorkflow
 
@@ -330,10 +329,7 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
                 </button>
               </header>
               <div className={dockCss.drawerBody}>
-                {/* The view type wants the full session standard kit; both
-                    slots are session-scoped, so forwarding this component's
-                    props carries useSession/useProjection & friends through. */}
-                <WorkflowFlowView {...props} workflowClient={workflowClient} />
+                <WorkflowFlowView sessionId={sessionId} t={t} />
               </div>
             </aside>
           )

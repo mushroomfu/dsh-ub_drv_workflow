@@ -30,104 +30,96 @@ function firstStringField(record: Record<string, unknown>, keys: readonly string
   return undefined
 }
 
-const MAX_SEARCH_DEPTH = 32
-const MAX_SEARCH_NODES = 4_096
-
-interface SearchNode {
-  value: unknown
-  depth: number
+/** Collapse any JSON-ish value into readable text (arrays of blocks become lines). */
+export function collapseText(value: unknown, maxLength = 1200): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value.map(item => collapseText(item, maxLength)).filter(Boolean).join('\n').slice(0, maxLength)
+  }
+  if (isRecord(value)) {
+    const text = firstStringField(value, ['text', 'content', 'message', 'summary', 'title'])
+    if (text !== undefined) return collapseText(text, maxLength)
+    // Tool call / structured block: keep the tool-ish identifiers, not raw ids.
+    const toolName = firstStringField(value, ['tool', 'toolName', 'name'])
+    if (toolName !== undefined) return toolName
+  }
+  return ''
 }
 
-function boundedSearch<T>(root: unknown, inspect: (value: unknown) => T | undefined, childKeys?: readonly string[]): T | undefined {
-  const pending: SearchNode[] = [{ value: root, depth: 0 }]
-  let visited = 0
-  while (pending.length > 0 && visited < MAX_SEARCH_NODES) {
-    const current = pending.pop()
-    if (current === undefined) break
-    visited += 1
-    const found = inspect(current.value)
-    if (found !== undefined) return found
-    if (current.depth >= MAX_SEARCH_DEPTH) continue
-    if (Array.isArray(current.value)) {
-      for (let index = current.value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: current.value[index], depth: current.depth + 1 })
-      }
-    } else if (isRecord(current.value)) {
-      const record = current.value
-      const preferred = childKeys === undefined ? [] : childKeys.filter(key => key in record)
-      const preferredSet = new Set(preferred)
-      const other = Object.keys(record).filter(key => key !== 'raw' && !preferredSet.has(key))
-      const ordered = [...preferred, ...other]
-      for (let index = ordered.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: record[ordered[index]], depth: current.depth + 1 })
-      }
+/** Recursively locate the first useful session id shaped string. */
+export function findSessionId(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    // Accept obvious session id shapes: ses_…, session_…, any 26-char cuid-like
+    // token next to a session field is handled by the field-name search below.
+    if (/^(ses_|session_)[A-Za-z0-9_-]+$/.test(value)) return value
+    return undefined
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findSessionId(item)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (isRecord(value)) {
+    const direct = firstStringField(value, ['sessionId', 'sessionID', 'session_id'])
+    if (direct !== undefined && direct !== '') return direct
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'raw' || key === 'parts' || key === 'text') continue
+      const found = findSessionId(child)
+      if (found !== undefined) return found
     }
   }
   return undefined
 }
 
-/** Collapse any JSON-ish value into readable text (arrays of blocks become lines). */
-export function collapseText(value: unknown, maxLength = 1200): string {
-  const parts: string[] = []
-  const pending: SearchNode[] = [{ value, depth: 0 }]
-  let visited = 0
-  let length = 0
-  while (pending.length > 0 && visited < MAX_SEARCH_NODES && length < maxLength) {
-    const current = pending.pop()
-    if (current === undefined) break
-    visited += 1
-    if (typeof current.value === 'string' || typeof current.value === 'number' || typeof current.value === 'boolean') {
-      const part = String(current.value).trim()
-      if (part !== '') {
-        parts.push(part)
-        length += part.length + 1
-      }
-      continue
-    }
-    if (current.depth >= MAX_SEARCH_DEPTH) continue
-    if (Array.isArray(current.value)) {
-      for (let index = current.value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: current.value[index], depth: current.depth + 1 })
-      }
-    } else if (isRecord(current.value)) {
-      const text = firstStringField(current.value, ['text', 'content', 'message', 'summary', 'title'])
-      const toolName = firstStringField(current.value, ['tool', 'toolName', 'name'])
-      const selected = text ?? toolName
-      if (selected !== undefined) pending.push({ value: selected, depth: current.depth + 1 })
-    }
-  }
-  return parts.join('\n').slice(0, maxLength)
-}
-
-/** Recursively locate the first useful session id shaped string. */
-export function findSessionId(value: unknown): string | undefined {
-  return boundedSearch(value, current => {
-    if (typeof current === 'string' && /^(ses_|session_)[A-Za-z0-9_-]+$/.test(current)) return current
-    if (isRecord(current)) {
-      const direct = firstStringField(current, ['sessionId', 'sessionID', 'session_id'])
-      if (direct !== undefined && direct !== '') return direct
-    }
-    return undefined
-  })
-}
-
 /** Recursively locate the first tool name in common opencode event shapes. */
 export function findToolName(value: unknown): string | undefined {
-  return boundedSearch(value, current => (
-    isRecord(current) ? firstStringField(current, ['tool', 'toolName', 'tool_name', 'name']) : undefined
-  ))
+  if (isRecord(value)) {
+    const direct = firstStringField(value, ['tool', 'toolName', 'tool_name', 'name'])
+    if (direct !== undefined) return direct
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'raw') continue
+      const found = findToolName(child)
+      if (found !== undefined) return found
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findToolName(item)
+      if (found !== undefined) return found
+    }
+  }
+  return undefined
 }
 
 /** Recursively locate the first human-readable text. */
 export function findText(value: unknown, maxLength = 1200): string {
-  return boundedSearch(value, current => {
-    if (typeof current === 'string') {
-      const text = current.trim().slice(0, maxLength)
-      return text === '' ? undefined : text
+  if (typeof value === 'string') return value.trim().slice(0, maxLength)
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = findText(item, maxLength)
+      if (text !== '') return text
     }
-    if (typeof current === 'number' || typeof current === 'boolean') return String(current)
-    return undefined
-  }, ['text', 'content', 'message', 'summary', 'title', 'error']) ?? ''
+    return ''
+  }
+  if (isRecord(value)) {
+    for (const key of ['text', 'content', 'message', 'summary', 'title', 'error']) {
+      if (key in value) {
+        const text = findText(value[key], maxLength)
+        if (text !== '') return text
+      }
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'raw') continue
+      if (typeof child === 'object' && child !== null) {
+        const text = findText(child, maxLength)
+        if (text !== '') return text
+      }
+    }
+  }
+  return ''
 }
 
 /**
@@ -135,7 +127,6 @@ export function findText(value: unknown, maxLength = 1200): string {
  * Always returns null or a normalized event; never throws.
  */
 export function parseOpencodeLine(line: string): ParsedOpencodeEvent | null {
-  if (line.length > 256 * 1024) return null
   const trimmed = line.trim()
   if (trimmed === '') return null
 
@@ -147,14 +138,11 @@ export function parseOpencodeLine(line: string): ParsedOpencodeEvent | null {
   }
   if (!isRecord(raw)) return null
 
-  try {
-    const type = firstStringField(raw, ['type', 'subtype', 'event'])
-    const subtype = firstStringField(raw, ['subtype', 'kind'])
-    const toolName = findToolName(raw)
-    const sessionId = findSessionId(raw)
-    const text = findText(raw)
-    return { type, subtype, sessionId, toolName, text: text || undefined, raw }
-  } catch {
-    return null
-  }
+  const type = firstStringField(raw, ['type', 'subtype', 'event'])
+  const subtype = firstStringField(raw, ['subtype', 'kind'])
+  const toolName = findToolName(raw)
+  const sessionId = findSessionId(raw)
+  const text = findText(raw)
+
+  return { type, subtype, sessionId, toolName, text: text || undefined, raw }
 }
