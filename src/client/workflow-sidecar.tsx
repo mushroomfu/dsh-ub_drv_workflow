@@ -10,11 +10,13 @@
  * even when a very large restored session no longer projects its early
  * command events.
  *
- * The visible button and drawer are portaled to `document.body`. The drawer
- * is a pure OVERLAY with NO backdrop: the conversation underneath stays fully
- * interactive (scroll, composer input, send) while the drawer is open. The
- * drawer's bottom edge dynamically clears the composer so the input box is
- * never covered.
+ * Layout: while the drawer is open the conversation column is pushed LEFT
+ * with an animated inline margin-right until its right edge meets the
+ * drawer's left edge flush — the conversation keeps its full surface (scroll,
+ * composer, send) beside the drawer instead of being covered. On very narrow
+ * viewports the push is capped and the drawer overlays instead. There is no
+ * backdrop: clicking anywhere OUTSIDE the drawer closes it (the click still
+ * reaches the conversation), and the conversation itself stays interactive.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
@@ -30,10 +32,61 @@ export type WorkflowSidecarProps =
   & { workflowClient: UbWorkflowClient }
 
 const CLOSE_ANIMATION_MS = 240
-/** Drawer inset from the window bottom when no composer clearance applies. */
-const DRAWER_BOTTOM = 10
-/** The drawer never shrinks below this height; past it, it may overlap the composer. */
+const SHIFT_TRANSITION = 'margin-right 240ms cubic-bezier(0.22, 0.9, 0.28, 1)'
+/** The drawer is flush with the window's right edge, so its left edge is `innerWidth - drawerWidth`. */
+const DRAWER_RIGHT = 0
+/** The conversation column is never squeezed below this width; past it the drawer overlays the conversation instead of pushing it. */
+const MIN_CENTER_WIDTH = 360
+/** The drawer never shrinks below this height when capping the overlay above the composer. */
 const DRAWER_MIN_HEIGHT = 280
+/** Fallback drawer top when the titlebar cannot be measured. Equals the app titlebar height. */
+const TITLEBAR_BOTTOM = 36
+
+/**
+ * The conversation column is the parent of the `conversation` slot wrapper.
+ * This is the DSH-layout grid item (`centerCol`) that contains the whole
+ * conversation surface inside the `sidebar | center | details` grid frame.
+ */
+function findConversationColumn(): HTMLElement | null {
+  if (typeof document === 'undefined') return null
+  const root = document.getElementById('root') ?? document.body
+  const slot = root.querySelector('[data-slot="conversation"]')
+  return slot instanceof HTMLElement ? slot.parentElement : null
+}
+
+/**
+ * Resolve how far the column must shrink so its right edge meets the drawer's
+ * left edge exactly (integer CSS pixels on both sides → no seam, no overlap).
+ * Returns the shift plus whether the viewport was too narrow to fit it (the
+ * drawer then overlays the conversation instead of pushing it).
+ *
+ * The measurement is transition-proof: with an inline margin `m`, the column's
+ * right edge is `trackRight - m` and its width is `trackWidth - m`, so
+ * `rect.right + currentMargin` and `rect.width + currentMargin` recover the
+ * un-shifted track geometry even when read mid-animation (e.g. the drawer is
+ * reopened while the closing transition is still running).
+ */
+function measureShift(center: HTMLElement, drawer: HTMLElement): { shift: number, capped: boolean } {
+  const rect = center.getBoundingClientRect()
+  const margin = Number.parseFloat(window.getComputedStyle(center).marginRight) || 0
+  const trackRight = rect.right + margin
+  const trackWidth = rect.width + margin
+  const drawerLeft = window.innerWidth - DRAWER_RIGHT - drawer.offsetWidth
+  const wanted = Math.round(trackRight - drawerLeft)
+  const maxShift = Math.round(trackWidth - MIN_CENTER_WIDTH)
+  if (wanted <= maxShift) return { shift: Math.max(0, wanted), capped: false }
+  return { shift: Math.max(0, maxShift), capped: true }
+}
+
+/** Bottom edge (viewport px) of the window titlebar, or the documented fallback. */
+function titlebarBottom(): number {
+  const bar = document.querySelector('header.dshDesktopFrameTitlebar')
+  if (bar instanceof HTMLElement) {
+    const bottom = bar.getBoundingClientRect().bottom
+    if (bottom > 0 && bottom < 120) return Math.round(bottom)
+  }
+  return TITLEBAR_BOTTOM
+}
 
 /**
  * Top edge of the conversation's input card, or -1 when absent.
@@ -63,6 +116,8 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
   const [panel, setPanel] = useState<'closed' | 'open' | 'closing'>('closed')
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const drawerRef = useRef<HTMLElement | null>(null)
+  const fabRef = useRef<HTMLButtonElement | null>(null)
+  const shiftTargetRef = useRef<HTMLElement | null>(null)
 
   const transcriptHasWorkflow = useSession(snapshot => {
     // Snapshot shape varies across app versions: nodes live top-level or under
@@ -106,6 +161,93 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
     })
   }, [])
 
+  /**
+   * Push the conversation column left while the drawer is open (and back on
+   * close). The drawer meets the column's right edge flush, so the column
+   * keeps its full interactive surface beside the drawer. When the viewport
+   * is too narrow to push, the drawer overlays instead and then keeps its
+   * bottom edge clear of the composer so the input stays usable.
+   */
+  const applyShift = useCallback((): void => {
+    const center = shiftTargetRef.current
+    const drawer = drawerRef.current
+    if (center === null || drawer === null || !center.isConnected) return
+    const { shift, capped } = measureShift(center, drawer)
+    center.style.marginRight = `${shift}px`
+    if (capped) {
+      const composerTop = findComposerTop()
+      let bottom = 10
+      if (composerTop > titlebarBottom()) bottom = Math.max(10, Math.round(window.innerHeight - composerTop) + 12)
+      const maxBottom = Math.max(10, window.innerHeight - titlebarBottom() - DRAWER_MIN_HEIGHT)
+      drawer.style.bottom = `${Math.min(bottom, maxBottom)}px`
+    } else {
+      drawer.style.bottom = ''
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!hasWorkflow) return
+
+    if (panel === 'open') {
+      const center = findConversationColumn()
+      const drawer = drawerRef.current
+      if (center === null || drawer === null) return
+      shiftTargetRef.current = center
+      drawer.style.top = `${titlebarBottom()}px`
+      center.style.transition = SHIFT_TRANSITION
+      applyShift()
+      return
+    }
+
+    if (panel === 'closing') {
+      const center = shiftTargetRef.current
+      if (center === null || !center.isConnected) return
+      center.style.transition = SHIFT_TRANSITION
+      center.style.marginRight = '0px'
+      return
+    }
+
+    // Drawer fully closed: remove our inline styles so the layout is
+    // completely back in the host's hands.
+    const center = shiftTargetRef.current
+    if (center !== null && center.isConnected) {
+      center.style.transition = ''
+      center.style.marginRight = ''
+    }
+    if (drawerRef.current !== null) {
+      drawerRef.current.style.bottom = ''
+      drawerRef.current.style.top = ''
+    }
+    shiftTargetRef.current = null
+  }, [panel, hasWorkflow, applyShift])
+
+  // Keep the push in sync with viewport resizes while the drawer is open.
+  useEffect(() => {
+    if (!hasWorkflow || panel !== 'open') return
+    window.addEventListener('resize', applyShift)
+    return () => window.removeEventListener('resize', applyShift)
+  }, [panel, hasWorkflow, applyShift])
+
+  /**
+   * Click-outside close WITHOUT a backdrop: a document-level pointerdown that
+   * lands outside the drawer (and outside our own FAB, which toggles itself)
+   * closes the drawer. The event still reaches the conversation underneath,
+   * so scrolling, typing and sending keep working — the first click on the
+   * conversation simply also dismisses the drawer.
+   */
+  useEffect(() => {
+    if (panel !== 'open') return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (drawerRef.current?.contains(target) === true) return
+      if (fabRef.current?.contains(target) === true) return
+      requestClose()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [panel, requestClose])
+
   // Esc closes the drawer, mirroring the header close button.
   useEffect(() => {
     if (panel !== 'open') return
@@ -116,30 +258,8 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
     return () => window.removeEventListener('keydown', onKey)
   }, [panel, requestClose])
 
-  /**
-   * Keep the drawer clear of the conversation's input card: the composer
-   * (editor, send button, accessory rows) stays fully visible and usable
-   * while the drawer is open. Without a composer (blank hero) fall back to
-   * the plain window inset.
-   */
-  const applyComposerClearance = useCallback((): void => {
-    const drawer = drawerRef.current
-    if (drawer === null) return
-    const composerTop = findComposerTop()
-    let bottom = DRAWER_BOTTOM
-    if (composerTop > 44) bottom = Math.max(DRAWER_BOTTOM, Math.round(window.innerHeight - composerTop) + 12)
-    const maxBottom = Math.max(DRAWER_BOTTOM, window.innerHeight - 44 - DRAWER_MIN_HEIGHT)
-    drawer.style.bottom = `${Math.min(bottom, maxBottom)}px`
-  }, [])
-
-  useLayoutEffect(() => {
-    if (panel !== 'open') return
-    applyComposerClearance()
-    window.addEventListener('resize', applyComposerClearance)
-    return () => window.removeEventListener('resize', applyComposerClearance)
-  }, [panel, applyComposerClearance])
-
-  // Reset the panel when the conversation stops being a workflow conversation.
+  // If this conversation stops being a workflow conversation, restore the
+  // column and reset the panel so nothing is left behind.
   useEffect(() => {
     if (hasWorkflow) return
     if (closeTimer.current !== null) {
@@ -147,14 +267,26 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
       closeTimer.current = null
     }
     setPanel('closed')
+    const center = shiftTargetRef.current
+    if (center !== null && center.isConnected) {
+      center.style.transition = ''
+      center.style.marginRight = ''
+    }
+    shiftTargetRef.current = null
   }, [hasWorkflow])
 
-  // Safety net: cancel the close timer after unmount.
+  // Safety net: never leave the host column shifted after unmount.
   useEffect(() => () => {
     if (closeTimer.current !== null) {
       clearTimeout(closeTimer.current)
       closeTimer.current = null
     }
+    const center = shiftTargetRef.current
+    if (center !== null && center.isConnected) {
+      center.style.transition = ''
+      center.style.marginRight = ''
+    }
+    shiftTargetRef.current = null
   }, [])
 
   if (!hasWorkflow) return null
@@ -170,6 +302,7 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
   return createPortal(
     <div className={dockCss.root} data-panel={panel}>
       <button
+        ref={fabRef}
         type="button"
         className={dockCss.fab}
         title={t('title')}
