@@ -51,7 +51,14 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
   const activeForSession = rawActive !== null && (rawActive.sessionId === undefined || rawActive.sessionId === sessionId)
     ? rawActive
     : null
-  const sessionSummaries = (snapshot?.runs ?? []).filter(run => run.sessionId === undefined || run.sessionId === sessionId)
+  // Session-scoped history only. Legacy runs without a sessionId belong to
+  // conversations created before session binding existed — showing them in
+  // EVERY session's drawer made unrelated old stopped runs (e.g. "用户终止")
+  // appear as this conversation's progress. They are only used as a fallback
+  // when this session has no runs of its own.
+  const ownRuns = (snapshot?.runs ?? []).filter(run => run.sessionId === sessionId)
+  const legacyRuns = (snapshot?.runs ?? []).filter(run => run.sessionId === undefined)
+  const sessionSummaries = ownRuns.length > 0 ? ownRuns : legacyRuns
   const [fallbackRun, setFallbackRun] = useState<WorkflowRun | null>(null)
 
   const latestSummaryRunId = sessionSummaries[0]?.runId
