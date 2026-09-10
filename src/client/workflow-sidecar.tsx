@@ -10,12 +10,13 @@
  * even when a very large restored session no longer projects its early
  * command events.
  *
- * The visible button and drawer are portaled to `document.body` so they float
- * beside the conversation with independent fixed positioning and animated
- * transitions.
+ * The visible button and drawer are portaled to `document.body`. The drawer
+ * is a pure OVERLAY: it floats above the untouched conversation (the host
+ * layout is never modified — no margin, no transform), so the chat keeps its
+ * full width and scroll position while the workflow panel is open.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { WorkflowFlowView } from './WorkflowFlowView.tsx'
@@ -28,59 +29,11 @@ export type WorkflowSidecarProps =
   & { workflowClient: UbWorkflowClient }
 
 const CLOSE_ANIMATION_MS = 240
-const SHIFT_TRANSITION = 'margin-right 240ms cubic-bezier(0.22, 0.9, 0.28, 1)'
-/** The drawer is flush with the window's right edge, so its left edge is `innerWidth - drawerWidth`. */
-const DRAWER_RIGHT = 0
-/** The conversation column is never squeezed below this width; past it the drawer overlays the conversation instead of pushing it. */
-const MIN_CENTER_WIDTH = 360
-
-/**
- * The conversation column is the parent of the `conversation` slot wrapper.
- * This is the DSH-layout grid item (`centerCol`) that contains the whole
- * conversation surface inside the `sidebar | center | details` grid frame.
- *
- * While the drawer is open we shrink this item with an inline `margin-right`
- * (animated) until its right edge meets the drawer's left edge flush. Flush is
- * what erases the seam: the conversation surface and the drawer composite the
- * same family of translucent background, so at the join no divider line can
- * appear. The item also stays anchored at the left edge of its grid track, so
- * nothing ever overlaps the sidebar and nothing is clipped by the frame's
- * `overflow: hidden`.
- */
-function findConversationColumn(): HTMLElement | null {
-  if (typeof document === 'undefined') return null
-  const root = document.getElementById('root') ?? document.body
-  const slot = root.querySelector('[data-slot="conversation"]')
-  return slot instanceof HTMLElement ? slot.parentElement : null
-}
-
-/**
- * Resolve how far the column must shrink so its right edge meets the drawer's
- * left edge exactly (integer CSS pixels on both sides → no seam, no overlap).
- *
- * The measurement is transition-proof: with an inline margin `m`, the column's
- * right edge is `trackRight - m` and its width is `trackWidth - m`, so
- * `rect.right + currentMargin` and `rect.width + currentMargin` recover the
- * un-shifted track geometry even when read mid-animation (e.g. the drawer is
- * reopened while the closing transition is still running).
- */
-function measureShift(center: HTMLElement, drawer: HTMLElement): number {
-  const rect = center.getBoundingClientRect()
-  const margin = Number.parseFloat(window.getComputedStyle(center).marginRight) || 0
-  const trackRight = rect.right + margin
-  const trackWidth = rect.width + margin
-  const drawerLeft = window.innerWidth - DRAWER_RIGHT - drawer.offsetWidth
-  const shift = Math.round(trackRight - drawerLeft)
-  const maxShift = Math.round(trackWidth - MIN_CENTER_WIDTH)
-  return Math.min(Math.max(0, shift), Math.max(0, maxShift))
-}
 
 export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
-  const { sessionId, t, useSession, workflowClient } = props
+  const { t, useSession, workflowClient } = props
   const [panel, setPanel] = useState<'closed' | 'open' | 'closing'>('closed')
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const drawerRef = useRef<HTMLElement | null>(null)
-  const shiftTargetRef = useRef<HTMLElement | null>(null)
 
   const transcriptHasWorkflow = useSession(snapshot => {
     // Snapshot shape varies across app versions: nodes live top-level or under
@@ -112,56 +65,7 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
 
   const hasWorkflow = transcriptHasWorkflow || registryHasWorkflow
 
-  // Shrink the conversation column while the drawer is open and grow it back
-  // while the drawer closes. Only the inline margin-right changes, with the
-  // same duration/easing as the drawer slide, so the two animations stay
-  // symmetrical; the column's left edge and the frame background never move.
-  useLayoutEffect(() => {
-    if (!hasWorkflow) return
-
-    if (panel === 'open') {
-      const center = findConversationColumn()
-      const drawer = drawerRef.current
-      if (center === null || drawer === null) return
-      shiftTargetRef.current = center
-      center.style.transition = SHIFT_TRANSITION
-      center.style.marginRight = `${measureShift(center, drawer)}px`
-      return
-    }
-
-    if (panel === 'closing') {
-      const center = shiftTargetRef.current
-      if (center === null || !center.isConnected) return
-      center.style.transition = SHIFT_TRANSITION
-      center.style.marginRight = '0px'
-      return
-    }
-
-    // Drawer fully closed: remove our inline styles so the layout is
-    // completely back in the host's hands.
-    const center = shiftTargetRef.current
-    if (center !== null && center.isConnected) {
-      center.style.transition = ''
-      center.style.marginRight = ''
-    }
-    shiftTargetRef.current = null
-  }, [panel, hasWorkflow])
-
-  // Keep the push in sync with viewport resizes while the drawer is open.
-  useEffect(() => {
-    if (!hasWorkflow || panel !== 'open') return
-    const onResize = (): void => {
-      const center = shiftTargetRef.current
-      const drawer = drawerRef.current
-      if (center === null || drawer === null || !center.isConnected) return
-      center.style.marginRight = `${measureShift(center, drawer)}px`
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [panel, hasWorkflow])
-
-  // If this conversation stops being a workflow conversation, restore the
-  // column and reset the panel so nothing is left behind.
+  // Reset the panel when the conversation stops being a workflow conversation.
   useEffect(() => {
     if (hasWorkflow) return
     if (closeTimer.current !== null) {
@@ -169,26 +73,14 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
       closeTimer.current = null
     }
     setPanel('closed')
-    const center = shiftTargetRef.current
-    if (center !== null && center.isConnected) {
-      center.style.transition = ''
-      center.style.marginRight = ''
-    }
-    shiftTargetRef.current = null
   }, [hasWorkflow])
 
-  // Safety net: never leave the host column shrunk after unmount.
+  // Safety net: cancel the close timer after unmount.
   useEffect(() => () => {
     if (closeTimer.current !== null) {
       clearTimeout(closeTimer.current)
       closeTimer.current = null
     }
-    const center = shiftTargetRef.current
-    if (center !== null && center.isConnected) {
-      center.style.transition = ''
-      center.style.marginRight = ''
-    }
-    shiftTargetRef.current = null
   }, [])
 
   if (!hasWorkflow) return null
@@ -230,7 +122,7 @@ export function UbWorkflowSidecar(props: WorkflowSidecarProps): ReactNode {
 
       {panel !== 'closed'
         ? (
-            <aside ref={drawerRef} className={dockCss.drawer} data-state={panel} onClick={event => { event.stopPropagation() }}>
+            <aside className={dockCss.drawer} data-state={panel} onClick={event => { event.stopPropagation() }}>
               <header className={dockCss.drawerHeader}>
                 <h2 className={dockCss.drawerTitle}>{t('title')}</h2>
               </header>
