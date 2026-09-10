@@ -11,9 +11,14 @@ export const STEP_META: Record<StepId, {
   needsUser: boolean
   gate?: WorkflowStep['gate']
 }> = {
-  'routing-plan': {
+  routing: {
     title: '路由与流程计划',
-    description: '识别模块 → 判定流程类型 → 生成阶段链与 workspace 建立计划，等待用户确认',
+    description: '识别模块 → 判定流程类型 → 生成阶段链与 workspace 建立计划',
+    needsUser: false,
+  },
+  'routing-plan': {
+    title: '路由计划确认',
+    description: '阶段链与 workspace 计划已生成，等待用户确认',
     needsUser: true,
     gate: 'routing-plan',
   },
@@ -91,26 +96,25 @@ export const STEP_META: Record<StepId, {
   },
 }
 
-/** Relative artifact paths (from the change workspace) marking a step complete. */
+/**
+ * Relative artifact paths (from the change workspace) marking a step complete.
+ * Multiple paths are AND-ed; `|` separates alternative names accepted for the
+ * same deliverable (legacy ub-leader layout | current harness workflow layout).
+ */
 export const ARTIFACT_HINTS: Record<StepId, string[]> = {
-  'routing-plan': ['.knowledge/events.ndjson'],
+  routing: ['.knowledge/events.ndjson'],
+  'routing-plan': [],
   requirement: ['requirement_analysis.md'],
-  design: ['detailed_design.md', 'delta/**/*.md'],
+  design: ['detailed_design.md', 'delta/**/*.md|delta-spec.md'],
   'design-gate': [],
-  develop: [
-    'implementation_notes.md',
-    'patch/*.patch',
-    'patch_report.md',
-    'pre_review_report.md',
-    'compile_report.md',
-  ],
+  develop: ['implementation_notes.md', 'patch/*.patch|patch/*.md'],
   'develop.implement': ['implementation_notes.md'],
-  'develop.patch': ['patch/*.patch', 'patch_report.md'],
+  'develop.patch': ['patch/*.patch|patch/*.md', 'patch_report.md|patch/README.md'],
   'develop.pre-review': ['pre_review_report.md'],
   'develop.compile': ['compile_report.md'],
   test: ['test_report.md'],
   review: ['module_review_report.md'],
-  verify: ['deploy_report.md'],
+  verify: ['deploy_report.md|verify_report.md'],
   'deploy-ok': [],
   closeout: ['workflow_report.md', 'archive_report.md'],
   explore: ['exploration_notes.md'],
@@ -141,8 +145,8 @@ function makeStep(id: StepId, status: WorkflowStep['status'] = 'pending'): Workf
 
 /**
  * Build the main step chain for a run.
- * - designOnly: requirement → design → design-gate (terminal).
- * - dev: routing-plan → requirement → design → design-gate → develop → test → review → closeout.
+ * - designOnly: routing → routing-plan → requirement → design → design-gate (terminal).
+ * - dev: routing → routing-plan → requirement → design → design-gate → develop → test → review → closeout.
  * - full: dev + verify → deploy-ok before closeout.
  * - explore: single explore step.
  */
@@ -158,6 +162,7 @@ export function buildStageChain(options: {
 
   if (designOnly) {
     return [
+      makeStep('routing', initial),
       makeStep('routing-plan', initial),
       makeStep('requirement', initial),
       makeStep('design', initial),
@@ -166,6 +171,7 @@ export function buildStageChain(options: {
   }
 
   const chain: StepId[] = [
+    'routing',
     'routing-plan',
     'requirement',
     'design',

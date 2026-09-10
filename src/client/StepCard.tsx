@@ -10,6 +10,8 @@ import css from './step-card.module.css'
 
 export interface StepCardProps {
   step: WorkflowStep
+  /** 1-based position in the main chain; substeps render a plain status dot. */
+  stepNo?: number
   statusLabel: (status: StepStatus) => string
   userNeededLabel: string
   confirmLabel: string
@@ -27,15 +29,26 @@ export interface StepCardProps {
   onCancel?: () => void
 }
 
+const DOT_CONTENT: Partial<Record<StepStatus, string>> = {
+  done: '✓',
+  failed: '✕',
+  skipped: '–',
+}
+
 export function StepCard(props: StepCardProps): ReactNode {
   const { step, busy = false, compact = false } = props
   const [showWritebacks, setShowWritebacks] = useState(false)
   const writebacks = step.writebacks ?? []
+  const dotStatus = step.status === 'waiting_user' ? 'waiting' : step.status
+  const dotContent = DOT_CONTENT[step.status] ?? (props.stepNo !== undefined ? String(props.stepNo) : '')
 
   return (
-    <section className={[css.card, compact ? css.compact : '', css[`status-${step.status === 'waiting_user' ? 'waiting' : step.status}`]].join(' ')}>
+    <section className={[css.card, compact ? css.compact : '', css[`status-${dotStatus}`]].join(' ')}>
       <header className={css.header}>
-        <span className={css.title}>{step.title}</span>
+        <div className={css.titleGroup}>
+          <span className={css.stepDot} data-status={dotStatus} aria-hidden="true">{dotContent}</span>
+          <span className={css.title}>{step.title}</span>
+        </div>
         {step.needsUser
           ? (
               <span className={css.userBadge} title={props.userNeededLabel}>

@@ -10,28 +10,33 @@ import { join } from 'node:path'
 import { applyArtifactEvidenceWithMtime, matchingFiles } from './core/artifacts.ts'
 import { parseOpencodeLine, type ParsedOpencodeEvent } from './core/opencodeEvents.ts'
 import { buildStageChain, STEP_META } from './core/stages.ts'
-import { attachFailure, markStepStatus, walkChain } from './core/stateMachine.ts'
+import { attachFailure, markStepStatus, resetAfter, walkChain } from './core/stateMachine.ts'
 import type { RunInput, RunMode, StepId, StepWriteback, WorkflowRun, WorkflowStep } from './core/types.ts'
 import { findLatestChangeId, listChangeFileStats, resolveChangeId } from './artifact-watcher.ts'
-import { OpenCodeRunner } from './runner.ts'
+import type { WorkflowRunner } from './runner.ts'
 import { WorkflowStore } from './store.ts'
 
 export interface EngineOptions {
   repoPath: string
   store: WorkflowStore
-  runner: OpenCodeRunner
+  runner: WorkflowRunner
   opencodeBin?: string
   pollMs?: number
   logTailLimit?: number
   onLog?: (line: string) => void
 }
 
-const SEGMENT_TITLES = ['routing-to-design-gate', 'develop-to-closeout', 'post-deploy-closeout'] as const
+const SEGMENT_TITLES = [
+  'routing-plan',
+  'routing-to-design-gate',
+  'develop-to-closeout',
+  'post-deploy-closeout',
+] as const
 
 export class WorkflowEngine {
   private readonly repoPath: string
   private readonly store: WorkflowStore
-  private readonly runner: OpenCodeRunner
+  private readonly runner: WorkflowRunner
   private readonly opencodeBin?: string
   private readonly pollMs: number
   private readonly logTailLimit: number
@@ -54,7 +59,7 @@ export class WorkflowEngine {
   }
 
   stopActiveProcess(): void {
-    this.runner.stop()
+    void this.runner.stop()
   }
 
   startPolling(): void {
@@ -72,7 +77,7 @@ export class WorkflowEngine {
 
   dispose(): void {
     this.stopPolling()
-    this.runner.stop()
+    void this.runner.stop()
   }
 
   /** Create a run from user input (does not spawn). */
@@ -109,18 +114,24 @@ export class WorkflowEngine {
   }
 
   /** Launch a run: routing plan is considered confirmed by the launch form. */
-  launch(run: WorkflowRun): boolean {
-    if (this.store.anyActive(run.repoPath, run.runId)) return false
+  async launch(run: WorkflowRun, hostAgent?: unknown): Promise<boolean> {
+    if (this.store.anyActiveForSession(run.repoPath, run.sessionId, run.runId)) {
+      run.status = 'failed'
+      run.error = '该会话已有进行中的工作流运行'
+      this.store.put(run)
+      this.store.persist(run.repoPath)
+      return false
+    }
     const now = new Date().toISOString()
     run.status = 'running'
     run.startedAt = now
     run.updatedAt = now
     run.segment = 0
-    markStepStatus(run.steps, 'routing-plan', 'done', now, '启动表单已确认流程计划')
-    const spawn = this.startSegment(run, 0)
+    markStepStatus(run.steps, 'routing', 'running', now, '正在生成路由与流程计划')
+    const spawn = await this.startSegment(run, 0, hostAgent)
     if (!spawn) {
       run.status = 'failed'
-      run.error = 'opencode 启动失败'
+      run.error = this.runner.kind === 'harness' ? 'Harness 执行引擎启动失败' : 'opencode 启动失败'
       this.store.persist(run.repoPath)
       return false
     }
@@ -130,17 +141,23 @@ export class WorkflowEngine {
     return true
   }
 
-  /** Stop a run and kill the underlying process. */
-  stopRun(runId: string): boolean {
+  /** Stop a run, keep its current step positions, and annotate the user stop. */
+  async stopRun(runId: string): Promise<boolean> {
     const run = this.store.get(runId)
     if (run === undefined) return false
-    this.runner.stop()
+    await this.runner.stop()
     run.status = 'stopped'
     run.updatedAt = new Date().toISOString()
     run.exitCode = null
+    run.error = '用户终止'
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting_user') {
-        step.status = 'skipped'
+        step.note = '用户终止'
+      }
+      if (step.substeps !== undefined) {
+        for (const sub of step.substeps) {
+          if (sub.status === 'running' || sub.status === 'waiting_user') sub.note = '用户终止'
+        }
       }
     }
     this.store.put(run)
@@ -149,7 +166,7 @@ export class WorkflowEngine {
   }
 
   /** Confirm or cancel a waiting user gate. */
-  resolveGate(runId: string, stepId: StepId, action: 'confirm' | 'cancel'): boolean {
+  async resolveGate(runId: string, stepId: StepId, action: 'confirm' | 'cancel'): Promise<boolean> {
     const run = this.store.get(runId)
     if (run === undefined) return false
     const step = run.steps.find(s => s.id === stepId)
@@ -158,10 +175,11 @@ export class WorkflowEngine {
     const now = new Date().toISOString()
 
     if (action === 'cancel') {
-      this.runner.stop()
-      markStepStatus(run.steps, stepId, 'failed', now, '用户取消')
-      run.status = 'stopped'
+      await this.runner.stop()
+      step.note = '用户终止'
       run.updatedAt = now
+      run.error = '用户终止'
+      run.status = 'stopped'
       this.store.put(run)
       this.store.persist(run.repoPath)
       return true
@@ -176,22 +194,26 @@ export class WorkflowEngine {
       run.status = 'done'
       run.finishedAt = now
       run.updatedAt = now
-      this.runner.stop()
+      await this.runner.stop()
       this.store.put(run)
       this.store.persist(run.repoPath)
       return true
     }
 
-    const nextSegment = stepId === 'design-gate' ? 1 : stepId === 'deploy-ok' ? 2 : run.segment
-    run.segment = nextSegment as 0 | 1 | 2
+    const nextSegment = stepId === 'routing-plan' ? 1 : stepId === 'design-gate' ? 2 : stepId === 'deploy-ok' ? 3 : run.segment
+    run.segment = nextSegment as 0 | 1 | 2 | 3
     run.status = 'running'
     run.updatedAt = now
-    this.runner.stop()
 
-    const spawn = this.startSegment(run, nextSegment as 0 | 1 | 2)
+    // Wait for a still-running harness turn to settle before continuing the
+    // same session. Opencode segments are stopped explicitly below.
+    if (this.runner.kind === 'harness') await this.runner.whenIdle()
+    else await this.runner.stop()
+
+    const spawn = await this.startSegment(run, nextSegment as 0 | 1 | 2 | 3)
     if (!spawn) {
       run.status = 'failed'
-      run.error = 'opencode 续跑启动失败'
+      run.error = this.runner.kind === 'harness' ? 'Harness 执行引擎续跑启动失败' : 'opencode 续跑启动失败'
     }
     this.store.put(run)
     this.store.persist(run.repoPath)
@@ -200,9 +222,10 @@ export class WorkflowEngine {
 
   /** Poll artifacts and advance the chain. Called on an interval and after events. */
   tick(): void {
-    const run = this.store.findActive(this.repoPath)
-    if (run === undefined || run.status === 'idle' || run.status === 'done' || run.status === 'stopped') return
-    if (run.status === 'running' || run.status === 'waiting_user') {
+    // Runs follow their own workspace (a slash-command run binds the invoking
+    // conversation's cwd, which may differ from the plugin's configured repo),
+    // so every active run reconciles against ITS OWN repoPath.
+    for (const run of this.store.allActive()) {
       this.reconcile(run)
     }
   }
@@ -214,8 +237,8 @@ export class WorkflowEngine {
       run.changeId = resolvedChangeId
     }
 
+    const stats = resolvedChangeId === undefined ? [] : listChangeFileStats(run.repoPath, resolvedChangeId)
     if (resolvedChangeId !== undefined) {
-      const stats = listChangeFileStats(run.repoPath, resolvedChangeId)
       const changed = applyArtifactEvidenceWithMtime(run.steps, stats, now)
       this.populateStepOutcomes(run, resolvedChangeId, stats)
       if (this.detectWritebacks(run, stats, resolvedChangeId)) {
@@ -229,13 +252,35 @@ export class WorkflowEngine {
     const confirmedGates = new Set<StepId>(
       run.steps.filter(s => s.gate !== undefined && s.status === 'done').map(s => s.id),
     )
+    // Gate catch-up: the conversation may confirm a gate in-band (the harness
+    // agent just proceeds past it in the dialogue) without the plugin's UI
+    // button ever being clicked. When a gate's DOWNSTREAM artifacts already
+    // exist, the workflow has factually passed that gate — treat it as
+    // confirmed so the chain does not stall on a wait the user already gave.
+    let gateChanged = false
+    for (const gate of run.steps.filter(s => s.gate !== undefined)) {
+      if (gate.status === 'done' || confirmedGates.has(gate.id)) continue
+      const gateIndex = run.steps.indexOf(gate)
+      const downstreamSatisfied = run.steps
+        .filter((s, index) => index > gateIndex && s.gate === undefined && s.artifactHints.length > 0)
+        .some(s => s.artifactHints.some(hint => matchingFiles(hint, stats).length > 0))
+      if (downstreamSatisfied) {
+        markStepStatus(run.steps, gate.id, 'done', now, '已在会话中确认（产物已推进）')
+        confirmedGates.add(gate.id)
+        gateChanged = true
+      }
+    }
+    if (gateChanged) this.persist(run)
+
     const outcome = walkChain(run.steps, { designOnly: run.designOnly, confirmedGates, now })
 
     if (outcome.stoppedOnGate !== undefined) {
       run.status = 'waiting_user'
-      // Keep the non-interactive process from lingering while the UI waits for
-      // the user: opencode has already persisted the session at this point.
-      if (this.runner.running) this.runner.stop()
+      // For opencode, keep the non-interactive process from lingering while
+      // the UI waits for the user. The Harness agent owns its session and will
+      // settle at the next whenIdle boundary on its own; disposing it here
+      // would lose the session we need to resume after confirmation.
+      if (this.runner.kind === 'opencode' && this.runner.running) void this.runner.stop()
       this.persist(run)
       return
     }
@@ -340,16 +385,29 @@ export class WorkflowEngine {
       item.step.note = `回写 #${seq}：${item.reason.slice(0, 160)}`
     }
 
-    // Re-open the earliest re-run step only. Keeping downstream steps done
-    // avoids re-closing them on stale artifacts before the workflow re-runs
-    // them; they re-open individually when their own files are rewritten.
+    // Re-open the earliest re-run step and reset every later stage so the
+    // diagram matches the actual workflow: a review finding hands back to
+    // develop, so test/review/closeout are no longer valid until re-run.
     const reStep = earliest.step
+    const reParent = earliest.parent
     if (reStep.status === 'done') {
+      // Reset later main steps (and their substeps) first, then the re-opened
+      // step's own substeps when it is a composite step like develop.
+      resetAfter(run.steps, reStep.id)
+      if (reStep.id === 'develop' && reStep.substeps !== undefined) {
+        for (const sub of reStep.substeps) {
+          sub.status = 'pending'
+          sub.startedAt = undefined
+          sub.finishedAt = undefined
+          sub.note = undefined
+          sub.error = undefined
+        }
+      }
       reStep.status = 'running'
       reStep.startedAt = new Date().toISOString()
-      if (earliest.parent !== undefined && earliest.parent.status === 'done') {
-        earliest.parent.status = 'running'
-        if (earliest.parent.startedAt === undefined) earliest.parent.startedAt = reStep.startedAt
+      if (reParent !== undefined && reParent.status === 'done') {
+        reParent.status = 'running'
+        if (reParent.startedAt === undefined) reParent.startedAt = reStep.startedAt
       }
       run.status = 'running'
     }
@@ -420,26 +478,38 @@ export class WorkflowEngine {
     if (run === undefined) return
     run.exitCode = code
     run.updatedAt = new Date().toISOString()
-    this.pushLog(run, `[opencode exited] code=${code} signal=${signal}`)
+    this.pushLog(run, this.runner.kind === 'harness'
+      ? `[harness turn idle] code=${code} signal=${signal}`
+      : `[opencode exited] code=${code} signal=${signal}`)
 
     this.reconcile(run)
 
     if (run.status === 'running' || run.status === 'waiting_user') {
-      // Process ended before the chain did. If the next barrier is a gate we
-      // are already waiting on, leave it waiting; otherwise attribute failure
-      // to the current step.
+      // The executor settled before the chain did. If the next barrier is a
+      // gate we are already waiting on, leave it waiting; otherwise either
+      // close the run (terminal gate already done) or attribute failure to the
+      // current unfinished step so the run never lingers in `running`.
       const nextWaiting = run.steps.find(s => s.status === 'waiting_user')
-      if (nextWaiting === undefined && !run.designOnly) {
-        const failed = attachFailure(run.steps, `opencode 进程退出 (code=${code})`)
-        run.status = failed === undefined ? 'done' : 'failed'
-        run.error = `opencode 进程非正常退出 (code=${code})`
-      } else if (nextWaiting === undefined && run.designOnly) {
-        // design-only naturally ends after the design gate is confirmed; treat
-        // an exited process with only the terminal gate remaining as done.
-        const gate = run.steps.find(s => s.id === 'design-gate')
-        if (gate?.status === 'done') {
-          run.status = 'done'
-          run.finishedAt = run.finishedAt ?? new Date().toISOString()
+      if (nextWaiting === undefined) {
+        const hasAnyRunning = (steps: WorkflowStep[]): boolean => steps.some(s =>
+          s.status === 'running'
+          || (s.substeps?.some(sub => sub.status === 'running') ?? false),
+        )
+        // A detected write-back re-opens the earliest affected step; the run
+        // must stay `running` there instead of being failed for idling after
+        // the review→develop hand-back.
+        const runClosed = run.designOnly && run.steps.find(s => s.id === 'design-gate')?.status === 'done'
+          ? (run.status = 'done', run.finishedAt = run.finishedAt ?? new Date().toISOString(), true)
+          : false
+        if (!runClosed && !hasAnyRunning(run.steps)) {
+          const failure = this.runner.kind === 'harness'
+            ? 'Harness Agent 已空闲但当前步骤产物未满足完成条件'
+            : `opencode 进程退出 (code=${code})`
+          const failed = attachFailure(run.steps, failure)
+          run.status = failed === undefined ? 'done' : 'failed'
+          run.error = this.runner.kind === 'harness'
+            ? '执行已结束，但未推进到下一个门禁或完成态'
+            : `opencode 进程非正常退出 (code=${code})`
         }
       }
     }
@@ -447,13 +517,17 @@ export class WorkflowEngine {
     this.store.persist(run.repoPath)
   }
 
-  private startSegment(run: WorkflowRun, segment: 0 | 1 | 2): boolean {
-    return this.runner.start({
+  private async startSegment(run: WorkflowRun, segment: 0 | 1 | 2 | 3, hostAgent?: unknown): Promise<boolean> {
+    const prompt = this.runner.kind === 'harness'
+      ? this.buildHarnessPrompt(run, segment)
+      : this.buildPrompt(run, segment)
+    return await this.runner.start({
       repoPath: run.repoPath,
       sessionId: run.runId,
       title: `dsh-ub-workflow:${run.module ?? ''}:${SEGMENT_TITLES[segment]}:${run.runId.slice(0, 8)}`,
-      prompt: this.buildPrompt(run, segment),
+      prompt,
       opencodeBin: this.opencodeBin,
+      hostAgent,
       onEvent: event => { this.onEvent(run.runId, event) },
       onExit: (code, signal) => { this.onExit(run.runId, code, signal) },
       onLogLine: line => {
@@ -463,7 +537,62 @@ export class WorkflowEngine {
     })
   }
 
-  private buildPrompt(run: WorkflowRun, segment: 0 | 1 | 2): string {
+  /** Plain-human prompt for the Harness Agent (original conversation turn). */
+  private buildHarnessPrompt(run: WorkflowRun, segment: 0 | 1 | 2 | 3): string {
+    const context: string[] = []
+    if (run.module !== undefined && run.module !== '') context.push(`模块：${run.module}`)
+    context.push(`模式：${run.designOnly ? 'design-only' : run.mode}${run.deploy ? ' + deploy' : ''}`)
+    if (run.changeId !== undefined && run.changeId !== '') context.push(`change-id：${run.changeId}`)
+
+    const change = run.changeId ?? ''
+
+    if (segment === 0) {
+      return [
+        '请执行 UnifiedBus（UB）内核驱动 AI 开发工作流。',
+        '',
+        '本轮任务：',
+        run.requirement,
+        '',
+        '工作流参数：',
+        ...(context.length > 0 ? context.map(line => `- ${line}`) : []),
+        '',
+        '第一步是“路由与流程计划”：先阅读仓库内的 docs/references/skills，确认模块归属、判定流程类型、生成阶段链与 workspace 建立计划。',
+        `将路由结论写入仓库 ub-workspace/changes/${change}/.knowledge/events.ndjson（JSON Lines，每行一个事件对象）。`,
+        '完成路由计划后停止本轮，等待用户确认；不要开始需求分析，不要创建 requirement_analysis.md。',
+      ].join('\n')
+    }
+
+    if (segment === 1) {
+      return [
+        '用户已在 UB 工作流界面确认 routing-plan 通过。',
+        '',
+        '现在从建立 workspace 开始执行：需求分析 → 详细设计（含 delta spec 与 STC）。',
+        `所有工作产物必须写入仓库 ub-workspace/changes/${change}/ 目录下（requirement_analysis.md、detailed_design.md、delta/*.md 等）。`,
+        '到达 design-gate 后立即停止本轮，等待用户确认；不要继续进入开发阶段。',
+      ].join('\n')
+    }
+
+    if (segment === 2) {
+      const stopAtDeploy = run.mode === 'full' && run.deploy
+        ? '执行 verify 阶段后停在 deploy-ok 门禁，等待用户确认，不要继续 STC/closeout。'
+        : '继续执行后续全部阶段：编码实现 → 测试 → 代码审查 →（full 模式含 verify）→ closeout，直至工作流结束。'
+      return [
+        '用户已在 UB 工作流界面确认 design-gate 通过。',
+        '',
+        stopAtDeploy,
+        `后续产物仍写入 ub-workspace/changes/${change}/ 目录。`,
+        '其余自动门禁按 UB 工作流规则自动推进；不要在确认过的 design-gate 上再次询问。',
+      ].join('\n')
+    }
+
+    return [
+      '用户已在 UB 工作流界面确认 deploy-ok 通过。',
+      '',
+      '请继续执行 STC 验证与 closeout（workflow 报告与归档），直至工作流结束。',
+    ].join('\n')
+  }
+
+  private buildPrompt(run: WorkflowRun, segment: 0 | 1 | 2 | 3): string {
     const params: string[] = []
     if (run.module !== undefined && run.module !== '') params.push(`--module ${run.module}`)
     if (run.designOnly) params.push('--stage design')
@@ -477,12 +606,23 @@ export class WorkflowEngine {
         run.requirement,
         '',
         '[dsh-ub-workflow 控制台指令（优先级高于默认流程）]',
-        '用户已在控制台启动表单中确认 0d 流程计划。请直接从 0e 建立 workspace 开始执行，',
-        'dispatch 至 design-gate 后停下等待用户确认，不要进入 develop。',
+        '请执行 0d 路由与流程计划：识别模块、判定流程类型、生成阶段链与 workspace 建立计划，',
+        '将结论写入 ub-workspace/changes/<change-id>/.knowledge/events.ndjson；完成后停止等待用户确认，',
+        '不要进入 0e 需求分析。',
       ].filter(line => line !== '').join('\n')
     }
 
     if (segment === 1) {
+      return [
+        params.join(' '),
+        run.requirement,
+        '',
+        '[dsh-ub-workflow 控制台指令（优先级高于默认流程）]',
+        '用户已确认 routing-plan。请从 0e 建立 workspace 开始，dispatch 至 design-gate 后停下等待用户确认。',
+      ].filter(line => line !== '').join('\n')
+    }
+
+    if (segment === 2) {
       const stopAtDeploy = run.mode === 'full' && run.deploy
         ? '执行 verify 阶段后，在 deploy-ok 门禁停下等待用户确认，不要继续 STC/closeout。'
         : '继续执行后续全部阶段：develop → test → review →（full 模式含 verify）→ closeout。'

@@ -5,9 +5,10 @@
  * view is the live monitoring surface plus gate-confirmation controls.
  */
 
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { StepStatus, WorkflowStep } from '../core/types.ts'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { StepStatus, WorkflowRun, WorkflowStep } from '../core/types.ts'
+import { allSteps } from '../core/stages.ts'
+import { ubWorkflowClient } from './api.ts'
 import { useWorkflowRun } from './useWorkflowRun.ts'
 import { StepCard } from './StepCard.tsx'
 import { type UbWorkflowKey } from './locales.ts'
@@ -15,9 +16,12 @@ import css from './workflow-flow.module.css'
 
 const SERVER_NS = 'ub-workflow'
 
-export type WorkflowFlowViewProps =
-  PropsRuntime<'conversation.view'>
-  & PropsLocale<'ub-workflow'>
+export type WorkflowFlowViewProps = {
+  /** Current conversation session id used to scope the displayed runs. */
+  sessionId: string
+  /** Namespace-bound locale function supplied by the hosting component. */
+  t: (key: UbWorkflowKey) => string
+}
 
 const STATUS_TEXT_KEY: Record<StepStatus, UbWorkflowKey> = {
   pending: 'status.pending',
@@ -38,12 +42,48 @@ const CONNECTOR_STATUS: Record<StepStatus, string> = {
 }
 
 export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
-  const { t } = props
+  const { t, sessionId } = props
   const ctrl = useWorkflowRun(1500)
   const [busyGate, setBusyGate] = useState<string | null>(null)
 
   const snapshot = ctrl.snapshot
-  const active = snapshot?.activeRun ?? null
+  const rawActive = snapshot?.activeRun ?? null
+  const activeForSession = rawActive !== null && (rawActive.sessionId === undefined || rawActive.sessionId === sessionId)
+    ? rawActive
+    : null
+  const sessionSummaries = (snapshot?.runs ?? []).filter(run => run.sessionId === undefined || run.sessionId === sessionId)
+  const [fallbackRun, setFallbackRun] = useState<WorkflowRun | null>(null)
+
+  const latestSummaryRunId = sessionSummaries[0]?.runId
+  useEffect(() => {
+    if (activeForSession !== null) {
+      setFallbackRun(null)
+      return
+    }
+    if (latestSummaryRunId === undefined) {
+      setFallbackRun(null)
+      return
+    }
+    let alive = true
+    setFallbackRun(null)
+    void ubWorkflowClient.run(latestSummaryRunId)
+      .then(({ run }) => { if (alive) setFallbackRun(run) })
+      .catch(() => { if (alive) setFallbackRun(null) })
+    return () => { alive = false }
+  }, [activeForSession, latestSummaryRunId, sessionId])
+
+  // Keep the last workflow visible after the conversation/run is terminated,
+  // so the current step position stays on screen with the stop annotation.
+  const active = activeForSession ?? fallbackRun
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  const progress = useMemo(() => {
+    if (active === null) return { done: 0, total: 0, pct: 0 }
+    const steps = allSteps(active.steps)
+    const done = steps.filter(step => step.status === 'done').length
+    const total = steps.length
+    return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 }
+  }, [active])
 
   const statusLabel = (status: StepStatus): string => t(STATUS_TEXT_KEY[status])
 
@@ -56,7 +96,7 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
     }
   }
 
-  const hasHistory = (snapshot?.runs.length ?? 0) > 0
+  const hasHistory = sessionSummaries.length > 0
 
   const flow = useMemo(() => {
     if (active === null) return null
@@ -68,6 +108,7 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
                 <div className={css.developGroup}>
                   <StepCard
                     step={step}
+                    stepNo={index + 1}
                     statusLabel={statusLabel}
                     userNeededLabel={t('userNeeded')}
                     confirmLabel={t('confirm')}
@@ -109,6 +150,7 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
             : (
                 <StepCard
                   step={step}
+                  stepNo={index + 1}
                   statusLabel={statusLabel}
                   userNeededLabel={t('userNeeded')}
                   confirmLabel={t('confirm')}
@@ -143,19 +185,6 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
           <h2 className={css.title}>{t('title')}</h2>
           <span className={css.tagline}>{t('tagline')}</span>
         </div>
-        {active !== null
-          ? (
-              <div className={css.actions}>
-                <button
-                  type="button"
-                  className={css.stopButton}
-                  onClick={() => { void ctrl.stop(active.runId) }}
-                >
-                  {t('stop')}
-                </button>
-              </div>
-            )
-          : null}
       </header>
 
       {ctrl.error !== null
@@ -178,17 +207,27 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
             <>
               <div className={css.runMeta}>
                 <span className={css.runId}>{t('activeRun')} · {active.changeId ?? ''}</span>
-                <span className={css.runStatus}>{statusLabel(runStatusToStepStatus(active.status))}</span>
+                <span className={css.runStatus}>{active.status === 'stopped' ? t('runStopped') : statusLabel(runStatusToStepStatus(active.status))}</span>
               </div>
-              {flow}
-              {active.logTail.length > 0
-                ? (
-                    <details className={css.logs}>
-                      <summary>log</summary>
-                      <pre className={css.logPre}>{active.logTail.slice(-30).join('\n')}</pre>
-                    </details>
-                  )
+
+              {active.status === 'stopped'
+                ? <div className={css.stoppedNotice}>{active.error ?? '用户终止'}</div>
                 : null}
+
+              <div className={css.progressBlock}>
+                <div className={css.progressTrack}>
+                  <div
+                    className={css.progressFill}
+                    style={{ width: `${progress.pct}%` }}
+                  />
+                </div>
+                <div className={css.progressMeta}>
+                  <span>{progress.done}/{progress.total}</span>
+                  <span className={css.progressPercent}>{progress.pct}%</span>
+                </div>
+              </div>
+
+              {flow}
             </>
           )
         : null}
@@ -196,23 +235,36 @@ export function WorkflowFlowView(props: WorkflowFlowViewProps): ReactNode {
       {hasHistory
         ? (
             <section className={css.history}>
-              <h3 className={css.historyTitle}>{t('history')}</h3>
-              {snapshot?.runs.map(run => (
-                <div key={run.runId} className={css.historyRow}>
-                  <span className={css.historyRunId}>{run.runId}</span>
-                  <span className={css.historyMeta}>
-                    {run.module ?? 'auto'} · {run.mode} · {run.changeId ?? ''}
-                  </span>
-                  <span className={css.historyStatus}>{statusLabel(runStatusToStepStatus(run.status))}</span>
-                  <button
-                    type="button"
-                    className={css.deleteButton}
-                    onClick={() => { void ctrl.remove(run.runId) }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              <button
+                type="button"
+                className={css.historyToggle}
+                onClick={() => { setHistoryOpen(value => !value) }}
+              >
+                <span className={css.historyCaret} aria-hidden="true">{historyOpen ? '▾' : '▸'}</span>
+                {t('history')}
+              </button>
+              {historyOpen
+                ? (
+                    <div className={css.historyPanel}>
+                      {sessionSummaries.map(run => (
+                        <div key={run.runId} className={css.historyRow}>
+                          <span className={css.historyRunId}>{run.runId}</span>
+                          <span className={css.historyMeta}>
+                            {run.module ?? 'auto'} · {run.mode} · {run.changeId ?? ''}
+                          </span>
+                          <span className={css.historyStatus}>{run.status === 'stopped' ? t('runStopped') : statusLabel(runStatusToStepStatus(run.status))}</span>
+                          <button
+                            type="button"
+                            className={css.deleteButton}
+                            onClick={() => { void ctrl.remove(run.runId) }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                : null}
             </section>
           )
         : null}

@@ -1,22 +1,25 @@
 /**
  * Browser-half entry for dsh-ub-workflow — runs inside the DSH web GUI.
- * Registers the locale dictionaries and mounts the workflow flow chart into
- * the conversation view ring (`conversation.view`), so it appears as a tab
- * beside the regular chat view.
+ *
+ * The visible entry is a session-scoped floating side button + animated right
+ * drawer. It is registered into `conversation.session.header.actions`, so the
+ * session-scoped component receives the conversation snapshot and decides from
+ * the durable `/ub-workflow` command node whether this conversation owns a
+ * workflow; other conversations never see it.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { en, zh } from './locales.ts'
 import './slots-augment.ts'
+import { UbWorkflowSidecar } from './workflow-sidecar.tsx'
 import { WorkflowFlowView } from './WorkflowFlowView.tsx'
 
 export type { WorkflowFlowViewProps } from './WorkflowFlowView.tsx'
 export { WorkflowFlowView } from './WorkflowFlowView.tsx'
 
-/** Required services: slots for the view ring, conversation for the seam, locale for copy. */
+/** Required services: slots for the session header, conversation for the seam, locale for copy. */
 export const inject = ['slots', 'conversation', 'locale']
 
 /** Dictionary namespace owned by this plugin. */
@@ -37,18 +40,27 @@ export function apply(ctx: ClientContext): void {
 
   ctx.inject(['slots', 'conversation'], (scope: ClientContext) => {
     try {
-      scope.slots.register(
-        {
-          name: 'conversation.view',
-          id: 'ub-workflow',
-          order: 300,
-          label: () => 'UB 工作流',
-          locale: NS,
-        },
-        WorkflowFlowView,
-      )
+      // Wait for the session header-actions slot declaration, then register.
+      // `slots.inject` guarantees the declaration exists before our entry.
+      return scope.slots.inject('conversation.session.header.actions', () => {
+        try {
+          return scope.slots.register(
+            {
+              name: 'conversation.session.header.actions',
+              id: 'ub-workflow',
+              order: 40,
+              locale: NS,
+            },
+            UbWorkflowSidecar,
+          )
+        } catch (error) {
+          console.warn('[ub-workflow] failed to register workflow sidecar', error)
+          return () => {}
+        }
+      })
     } catch (error) {
-      console.warn('[ub-workflow] failed to register into conversation.view', error)
+      console.warn('[ub-workflow] failed to wait for workflow sidecar slot', error)
+      return () => {}
     }
   })
 }

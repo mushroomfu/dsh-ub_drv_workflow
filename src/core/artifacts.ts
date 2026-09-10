@@ -50,8 +50,8 @@ function fileNamesOf(files: readonly ArtifactEvidenceFile[]): string[] {
   return files.map(entry => entry.file)
 }
 
-/** Files matching a single hint. */
-export function matchingFiles(hint: string, files: readonly ArtifactEvidenceFile[]): ArtifactEvidenceFile[] {
+/** Files matching a single alternative (no `|`). */
+function matchingFilesSingle(hint: string, files: readonly ArtifactEvidenceFile[]): ArtifactEvidenceFile[] {
   if (hint.includes('/') && !hint.includes('*')) {
     // Directory hint: any non-empty file beneath `dir/`.
     const dir = hint.split('/')[0] === '.' ? hint.split('/')[1] : hint.split('/')[0]
@@ -62,6 +62,28 @@ export function matchingFiles(hint: string, files: readonly ArtifactEvidenceFile
     return files.filter(entry => matchesArtifact(hint, entry.file))
   }
   return files.filter(entry => entry.file === hint)
+}
+
+/**
+ * Files matching a hint. A hint may list `|`-separated alternatives (e.g.
+ * `deploy_report.md|verify_report.md`); the hint matches when ANY alternative
+ * matches, so both the legacy ub-leader artifact layout and the current
+ * harness workflow's file names satisfy the same step.
+ */
+export function matchingFiles(hint: string, files: readonly ArtifactEvidenceFile[]): ArtifactEvidenceFile[] {
+  const alternatives = hint.split('|')
+  if (alternatives.length === 1) return matchingFilesSingle(hint, files)
+  const out: ArtifactEvidenceFile[] = []
+  const seen = new Set<string>()
+  for (const alternative of alternatives) {
+    for (const entry of matchingFilesSingle(alternative, files)) {
+      if (!seen.has(entry.file)) {
+        seen.add(entry.file)
+        out.push(entry)
+      }
+    }
+  }
+  return out
 }
 
 /** True when every hint matches at least one file. */

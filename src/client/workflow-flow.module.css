@@ -6,6 +6,11 @@
   height: 100%;
   box-sizing: border-box;
   overflow: auto;
+  scrollbar-width: none;
+}
+
+.view::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar {
@@ -22,12 +27,12 @@
 
 .title {
   margin: 0;
-  font-size: 17px;
+  font-size: 20px;
 }
 
 .tagline {
-  font-size: 12px;
-  opacity: 0.62;
+  font-size: 13px;
+  opacity: 0.65;
 }
 
 .actions {
@@ -55,9 +60,9 @@
 
 .runMeta {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .runId {
@@ -68,54 +73,98 @@
   opacity: 0.85;
 }
 
+.stoppedNotice {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: rgba(128, 128, 128, 0.12);
+  color: #ffb020;
+  font-size: 12px;
+}
+
+.progressBlock {
+  display: grid;
+  gap: 5px;
+}
+
+.progressTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #409cff, #2ea043);
+  transition: width 240ms ease;
+}
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.progressPercent {
+  font-weight: 650;
+}
+
 .flow {
   display: flex;
+  flex-direction: column;
   align-items: stretch;
   gap: 0;
   padding: 8px 0 4px;
-  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .connector {
   flex: none;
-  width: 22px;
+  width: 4px;
   align-self: center;
-  height: 3px;
-  margin: 0 2px;
+  height: 18px;
+  margin: 4px 0;
   border-radius: 2px;
   background: rgba(128, 128, 128, 0.45);
 }
 
-.connector[data-status='pending'] { background: rgba(128, 128, 128, 0.45); }
-.connector[data-status='running'] { background: #409cff; }
-.connector[data-status='waiting'] { background: #ffb020; }
-.connector[data-status='done'] { background: #2ea043; }
+.connector[data-status='pending'] { background: rgba(128, 128, 128, 0.25); }
+.connector[data-status='running'] { background: #409cff; box-shadow: 0 0 8px rgba(64, 156, 255, 0.55); animation: connectorGlow 1.6s ease-in-out infinite; }
+.connector[data-status='waiting'] { background: #ffb020; box-shadow: 0 0 6px rgba(255, 176, 32, 0.4); }
+.connector[data-status='done'] { background: #2ea043; box-shadow: 0 0 5px rgba(46, 160, 67, 0.35); }
 .connector[data-status='failed'] { background: #ff5252; }
 .connector[data-status='skipped'] { background: rgba(128, 128, 128, 0.3); }
 
 .developGroup {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   justify-items: stretch;
 }
 
 .substeps {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-left: 14px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(128, 128, 128, 0.25);
 }
 
 .miniConnector {
   flex: none;
-  width: 10px;
+  width: 4px;
   align-self: center;
-  height: 2px;
+  height: 12px;
+  margin: 2px auto;
   border-radius: 2px;
   background: rgba(128, 128, 128, 0.45);
 }
 
-.miniConnector[data-status='pending'] { background: rgba(128, 128, 128, 0.45); }
-.miniConnector[data-status='running'] { background: #409cff; }
+.miniConnector[data-status='pending'] { background: rgba(128, 128, 128, 0.25); }
+.miniConnector[data-status='running'] { background: #409cff; box-shadow: 0 0 6px rgba(64, 156, 255, 0.5); animation: connectorGlow 1.6s ease-in-out infinite; }
 .miniConnector[data-status='waiting'] { background: #ffb020; }
 .miniConnector[data-status='done'] { background: #2ea043; }
 .miniConnector[data-status='failed'] { background: #ff5252; }
@@ -184,16 +233,33 @@
 }
 
 .history {
-  border-top: 1px solid rgba(128, 128, 128, 0.25);
-  padding-top: 10px;
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
-.historyTitle {
-  margin: 0;
+.historyToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   font-size: 13px;
-  opacity: 0.75;
+  justify-self: start;
+}
+
+.historyCaret {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.historyPanel {
+  display: grid;
+  gap: 6px;
+  padding-left: 6px;
 }
 
 .historyRow {
@@ -229,4 +295,17 @@
   border: none;
   font-size: 14px;
   opacity: 0.6;
+}
+@keyframes connectorGlow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connector,
+  .miniConnector,
+  .progressFill {
+    animation: none !important;
+    transition: none !important;
+  }
 }

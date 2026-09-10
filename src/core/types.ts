@@ -21,6 +21,7 @@ export type RunStatus =
 
 /** Stable semantic step ids (not translated, stored in state files). */
 export type StepId =
+  | 'routing'
   | 'routing-plan'
   | 'requirement'
   | 'design'
@@ -96,8 +97,8 @@ export interface WorkflowRun {
   requirement: string
   status: RunStatus
   steps: WorkflowStep[]
-  /** Which opencode segment the engine is currently in (see runner). */
-  segment: 0 | 1 | 2
+  /** Which engine segment the run is currently in (see runner). */
+  segment: 0 | 1 | 2 | 3
   createdAt: string
   updatedAt: string
   startedAt?: string
@@ -133,5 +134,7 @@ export interface WorkflowStateSnapshot {
     mode: RunMode
     changeId?: string
     module?: string
+    /** Original conversation session id for slash-command-launched runs. */
+    sessionId?: string
   }>
 }

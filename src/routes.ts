@@ -75,15 +75,20 @@ interface RouteComposition {
 export function makeRoutes(get: RouteComposition): WebRoute[] {
   return [
     route(UB_WORKFLOW_API.state, async (_req, res) => {
+      get.engine() // refresh workspace set (sessions resume after boot)
       writeJson(res, 200, get.store().snapshot(get.repoPath()))
     }),
 
     route(UB_WORKFLOW_API.runs, async (_req, res) => {
-      writeJson(res, 200, { runs: get.store().listForRepo(get.repoPath()) })
+      get.engine() // refresh workspace set (sessions resume after boot)
+      // Runs follow their conversation workspaces, so the client filters by
+      // session from the full cross-workspace list.
+      writeJson(res, 200, { runs: get.store().listAll() })
     }),
 
     route(UB_WORKFLOW_API.run, async (req, res) => {
       if (req.method === 'GET') {
+        get.engine() // refresh workspace set (sessions resume after boot)
         const run = get.store().get(queryParam(req, 'run') ?? '')
         if (run === undefined) {
           writeJson(res, 404, { error: 'run not found' })
@@ -120,8 +125,8 @@ export function makeRoutes(get: RouteComposition): WebRoute[] {
         designOnly: body.designOnly === true,
         deploy: body.deploy === true,
       })
-      const ok = get.engine().launch(run)
-      writeJson(res, ok ? 201 : 500, ok ? { runId: run.runId, run } : { error: 'failed to launch opencode' })
+      const ok = await get.engine().launch(run)
+      writeJson(res, ok ? 201 : 500, ok ? { runId: run.runId, run } : { error: 'failed to launch workflow runner' })
     }),
 
     route(UB_WORKFLOW_API.gate, async (req, res) => {
@@ -137,7 +142,7 @@ export function makeRoutes(get: RouteComposition): WebRoute[] {
       const runId = requireRunId(res, typeof body.runId === 'string' ? body.runId : null)
       if (runId === null) return
       const action = body.action === 'cancel' ? 'cancel' : 'confirm'
-      const ok = get.engine().resolveGate(runId, body.stepId as StepId, action)
+      const ok = await get.engine().resolveGate(runId, body.stepId as StepId, action)
       writeJson(res, ok ? 200 : 404, { ok })
     }),
 
@@ -149,7 +154,7 @@ export function makeRoutes(get: RouteComposition): WebRoute[] {
       const body = await readJson<{ runId?: unknown }>(req)
       const runId = requireRunId(res, typeof body?.runId === 'string' ? body.runId : null)
       if (runId === null) return
-      const ok = get.engine().stopRun(runId)
+      const ok = await get.engine().stopRun(runId)
       writeJson(res, ok ? 200 : 404, { ok })
     }),
 
@@ -167,7 +172,9 @@ export function makeRoutes(get: RouteComposition): WebRoute[] {
         return
       }
       const ok = get.store().delete(runId)
-      get.store().persist(get.repoPath())
+      // Persist the workspace the run actually tracked, so its record leaves
+      // the right runs.json.
+      get.store().persist(active?.repoPath ?? get.repoPath())
       writeJson(res, ok ? 200 : 404, { ok })
     }),
   ]

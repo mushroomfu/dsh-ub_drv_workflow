@@ -55,7 +55,7 @@ describe('applyArtifactEvidence', () => {
     const steps = buildStageChain({ mode: 'dev' })
     const files = ['.knowledge/events.ndjson']
     void applyArtifactEvidence(steps, files)
-    expect(find(steps, 'routing-plan').status).toBe('done')
+    expect(find(steps, 'routing').status).toBe('done')
   })
 })
 

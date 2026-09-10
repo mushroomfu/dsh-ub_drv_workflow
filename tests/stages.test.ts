@@ -5,6 +5,7 @@ describe('buildStageChain', () => {
   it('builds the dev chain with develop substeps', () => {
     const chain = buildStageChain({ mode: 'dev' })
     expect(chain.map(s => s.id)).toEqual([
+      'routing',
       'routing-plan',
       'requirement',
       'design',
@@ -25,7 +26,7 @@ describe('buildStageChain', () => {
 
   it('builds the design-only chain ending at design-gate', () => {
     const chain = buildStageChain({ mode: 'dev', designOnly: true })
-    expect(chain.map(s => s.id)).toEqual(['routing-plan', 'requirement', 'design', 'design-gate'])
+    expect(chain.map(s => s.id)).toEqual(['routing', 'routing-plan', 'requirement', 'design', 'design-gate'])
   })
 
   it('adds verify + deploy-ok for full mode with deploy', () => {

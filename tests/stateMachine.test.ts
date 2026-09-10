@@ -16,12 +16,11 @@ function setDone(steps: WorkflowStep[], id: string): void {
 }
 
 describe('walkChain', () => {
-  it('sets the first non-gate step running after plan is done', () => {
+  it('starts with the routing step running first', () => {
     const steps = buildStageChain({ mode: 'dev' })
-    setDone(steps, 'routing-plan')
-    const outcome = walkChain(steps, { designOnly: false, confirmedGates: new Set(['routing-plan']) })
+    const outcome = walkChain(steps, { designOnly: false, confirmedGates: new Set() })
     expect(outcome.stoppedOnGate).toBeUndefined()
-    expect(steps.find(s => s.id === 'requirement')?.status).toBe('running')
+    expect(steps.find(s => s.id === 'routing')?.status).toBe('running')
   })
 
   it('stops at design-gate as a user wait', () => {
@@ -35,7 +34,7 @@ describe('walkChain', () => {
 
   it('continues dispatch after gate confirmations', () => {
     const steps = buildStageChain({ mode: 'dev' })
-    ;['routing-plan', 'requirement', 'design', 'design-gate'].forEach(id => setDone(steps, id))
+    ;['routing', 'routing-plan', 'requirement', 'design', 'design-gate'].forEach(id => setDone(steps, id))
     const outcome = walkChain(steps, {
       designOnly: false,
       confirmedGates: new Set(['routing-plan', 'design-gate']),
@@ -46,7 +45,7 @@ describe('walkChain', () => {
 
   it('keeps only one running step at a time', () => {
     const steps = buildStageChain({ mode: 'dev' })
-    ;['routing-plan', 'requirement'].forEach(id => setDone(steps, id))
+    ;['routing', 'routing-plan', 'requirement'].forEach(id => setDone(steps, id))
     walkChain(steps, { designOnly: false, confirmedGates: new Set(['routing-plan']) })
     expect(steps.filter(s => s.status === 'running')).toHaveLength(1)
     expect(steps.find(s => s.id === 'design')?.status).toBe('running')
@@ -63,12 +62,11 @@ describe('walkChain', () => {
 describe('markStepStatus / attachFailure', () => {
   it('sets a running step failed with an error message', () => {
     const steps = buildStageChain({ mode: 'dev' })
-    markStepStatus(steps, 'routing-plan', 'done')
-    walkChain(steps, { designOnly: false, confirmedGates: new Set(['routing-plan']) })
-    expect(steps.find(s => s.id === 'requirement')?.status).toBe('running')
+    walkChain(steps, { designOnly: false, confirmedGates: new Set() })
+    expect(steps.find(s => s.id === 'routing')?.status).toBe('running')
     const failed = attachFailure(steps, 'boom')
-    expect(failed).toBe('requirement')
-    expect(steps.find(s => s.id === 'requirement')?.status).toBe('failed')
-    expect(steps.find(s => s.id === 'requirement')?.error).toBe('boom')
+    expect(failed).toBe('routing')
+    expect(steps.find(s => s.id === 'routing')?.status).toBe('failed')
+    expect(steps.find(s => s.id === 'routing')?.error).toBe('boom')
   })
 })

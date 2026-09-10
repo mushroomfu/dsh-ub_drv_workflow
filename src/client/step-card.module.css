@@ -1,20 +1,87 @@
 .card {
   box-sizing: border-box;
-  min-width: 168px;
-  max-width: 220px;
-  padding: 10px 12px;
+  min-width: 0;
+  width: 100%;
+  padding: 14px 16px;
   border: 1px solid rgba(128, 128, 128, 0.35);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
   display: grid;
   gap: 6px;
-  transition: border-color 160ms, box-shadow 160ms, opacity 160ms;
+  transition: border-color 160ms, box-shadow 160ms, opacity 240ms;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 序号圆点：完成=实心绿✓，进行中=蓝圈脉冲，等待用户=琥珀圈呼吸，
+   待执行=灰虚线空心圈，失败=红圈✕，跳过=中灰。 */
+.stepDot {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1.5px solid transparent;
+}
+
+.stepDot[data-status='done'] {
+  background: #2ea043;
+  color: #fff;
+}
+
+.stepDot[data-status='running'] {
+  background: rgba(64, 156, 255, 0.16);
+  border-color: #409cff;
+  color: #409cff;
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.stepDot[data-status='waiting'] {
+  background: rgba(255, 176, 32, 0.14);
+  border-color: rgba(255, 176, 32, 0.9);
+  color: #ffb020;
+  animation: dotPulse 1.8s ease-in-out infinite;
+}
+
+.stepDot[data-status='pending'] {
+  background: transparent;
+  border: 1.5px dashed rgba(150, 150, 150, 0.65);
+  color: rgba(150, 150, 150, 0.9);
+}
+
+.stepDot[data-status='failed'] {
+  background: rgba(255, 82, 82, 0.14);
+  border-color: #ff5252;
+  color: #ff5252;
+}
+
+.stepDot[data-status='skipped'] {
+  background: rgba(128, 128, 128, 0.12);
+  border-color: rgba(128, 128, 128, 0.5);
+  color: rgba(160, 160, 160, 0.9);
+}
+
+.compact .stepDot {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  border-width: 1px;
 }
 
 .status-waiting {
   border-color: rgba(255, 176, 32, 0.9);
   box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.35), 0 6px 18px rgba(255, 176, 32, 0.12);
+  animation: waitingBreath 2.4s ease-in-out infinite;
 }
 
 .status-running {
@@ -40,12 +107,15 @@
 .status-done {
   border-color: rgba(46, 160, 67, 0.75);
   background: rgba(46, 160, 67, 0.12);
+  border-left: 3px solid #2ea043;
+  /* One-shot ripple the moment a step turns done. */
+  animation: donePop 700ms ease-out;
 }
 
 .status-pending {
-  border-color: rgba(128, 128, 128, 0.45);
-  background: rgba(128, 128, 128, 0.08);
-  color: rgba(190, 190, 190, 0.85);
+  border: 1px dashed rgba(128, 128, 128, 0.55);
+  background: rgba(128, 128, 128, 0.05);
+  opacity: 0.62;
 }
 
 .status-skipped {
@@ -53,20 +123,20 @@
 }
 
 .compact {
-  min-width: 76px;
-  max-width: 120px;
-  padding: 6px 8px;
-  gap: 4px;
-  border-radius: 9px;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  gap: 5px;
+  border-radius: 10px;
 }
 
 .compact .title {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .compact .badge {
-  font-size: 9px;
-  padding: 0 4px;
+  font-size: 11px;
+  padding: 1px 6px;
 }
 
 .header {
@@ -78,14 +148,14 @@
 
 .title {
   font-weight: 650;
-  font-size: 13px;
-  line-height: 1.25;
+  font-size: 16px;
+  line-height: 1.3;
 }
 
 .userBadge {
   flex: none;
-  font-size: 10px;
-  padding: 2px 5px;
+  font-size: 12px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: rgba(255, 176, 32, 0.18);
   color: #ffb020;
@@ -93,21 +163,21 @@
 
 .description {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.45;
-  opacity: 0.72;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.75;
 }
 
 .meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 6px;
-  font-size: 10px;
+  gap: 5px 8px;
+  font-size: 12px;
 }
 
 .badge {
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
 }
@@ -149,26 +219,26 @@
 
 .note {
   margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-  opacity: 0.75;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.78;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .error {
   margin: 0;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   color: #ff5252;
 }
 
 .artifacts {
-  font-size: 10px;
+  font-size: 12px;
   display: grid;
-  gap: 3px;
+  gap: 4px;
 }
 
 .artifactsLabel {
@@ -187,11 +257,11 @@
 
 .result {
   margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-  opacity: 0.85;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.88;
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
 .resultLabel,
@@ -201,18 +271,18 @@
 
 .outputDir {
   margin: 0;
-  font-size: 9px;
-  line-height: 1.35;
-  opacity: 0.68;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
   word-break: break-all;
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
 .writebackPill {
   flex: none;
-  font-size: 9px;
-  padding: 1px 5px;
+  font-size: 11px;
+  padding: 2px 7px;
   border-radius: 999px;
   border: 1px solid rgba(255, 176, 32, 0.55);
   background: rgba(255, 176, 32, 0.1);
@@ -235,12 +305,12 @@
 }
 
 .writebackSeq {
-  font-size: 9px;
-  opacity: 0.62;
+  font-size: 11px;
+  opacity: 0.65;
 }
 
 .writebackReason {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -253,21 +323,21 @@
 
 .gateHint {
   margin: 0;
-  font-size: 10px;
+  font-size: 12px;
   color: #ffb020;
 }
 
 .gateActions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .confirmButton,
 .cancelButton {
   flex: 1;
-  padding: 4px 8px;
-  border-radius: 8px;
-  font-size: 11px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  font-size: 13px;
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -297,4 +367,45 @@
 @keyframes gradientFlow {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
+}
+
+@keyframes dotPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(64, 156, 255, 0.45);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(64, 156, 255, 0);
+    opacity: 0.7;
+  }
+}
+
+@keyframes waitingBreath {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.35), 0 6px 18px rgba(255, 176, 32, 0.12); }
+  50% { box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.65), 0 6px 26px rgba(255, 176, 32, 0.22); }
+}
+
+@keyframes donePop {
+  0% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.55);
+    transform: translateY(0);
+  }
+  40% {
+    box-shadow: 0 0 0 10px rgba(46, 160, 67, 0);
+    transform: translateY(-2px);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0);
+    transform: translateY(0);
+  }
+}
+
+/* 系统关闭动画时：保留颜色/边框区分，去掉所有动态效果。 */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .stepDot,
+  .badge {
+    animation: none !important;
+    transition: none !important;
+  }
 }
